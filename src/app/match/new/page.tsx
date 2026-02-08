@@ -61,9 +61,12 @@ function NewMatchContent() {
       setGameTypes(types);
       setPlayers(activePlayers);
       if (types.length > 0) {
-        setSelectedGameType(types[0].id);
-        if (types[0].default_format) setFormat(types[0].default_format);
-        if (types[0].default_format_target) setFormatTarget(types[0].default_format_target);
+        // Default to 8-Ball if available, otherwise first type
+        const eightBall = types.find(t => t.name === '8-Ball');
+        const defaultType = eightBall || types[0];
+        setSelectedGameType(defaultType.id);
+        if (defaultType.default_format) setFormat(defaultType.default_format);
+        if (defaultType.default_format_target) setFormatTarget(defaultType.default_format_target);
       }
       setIsLoading(false);
     };
