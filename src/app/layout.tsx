@@ -4,6 +4,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import Header from '@/components/layout/Header';
 import BottomNav from '@/components/layout/BottomNav';
+import AppInitializer from '@/components/AppInitializer';
 
 export const metadata: Metadata = {
   title: 'Bar Room Buddies',
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body className="font-sans">
         <ThemeProvider>
           <AuthProvider>
+            <AppInitializer />
             <Header />
             <main>{children}</main>
             <BottomNav />

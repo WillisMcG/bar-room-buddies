@@ -110,8 +110,11 @@ export function getDeviceId(): string {
 }
 
 export async function seedSystemGameTypes() {
-  const existing = await db.gameTypes.where('is_system').equals(1).count();
-  if (existing > 0) return;
+  // Check if any system game types already exist (use toArray + filter since
+  // Dexie doesn't reliably query booleans with .equals())
+  const allTypes = await db.gameTypes.toArray();
+  const existingSystem = allTypes.filter(t => t.is_system);
+  if (existingSystem.length > 0) return;
 
   const systemTypes: LocalGameType[] = [
     {

@@ -26,12 +26,19 @@ export default function NewMatchPage() {
   const [showNewPlayer, setShowNewPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
+      // Seed system game types if they don't exist yet (handles first visit to this page)
+      const { seedSystemGameTypes } = await import('@/lib/db/dexie');
+      await seedSystemGameTypes();
+
       const types = await db.gameTypes.toArray();
-      const allPlayers = await db.profiles.where('merged_into').equals('').or('merged_into').equals(null as any).toArray();
+      // Get all profiles and filter in JS — querying for null in IndexedDB is unreliable
+      const allPlayers = await db.profiles.toArray();
       const activePlayers = allPlayers.filter(p => !p.merged_into);
+      activePlayers.sort((a, b) => a.display_name.localeCompare(b.display_name));
       setGameTypes(types);
       setPlayers(activePlayers);
       if (types.length > 0) {
@@ -39,6 +46,7 @@ export default function NewMatchPage() {
         if (types[0].default_format) setFormat(types[0].default_format);
         if (types[0].default_format_target) setFormatTarget(types[0].default_format_target);
       }
+      setIsLoading(false);
     };
     loadData();
   }, []);
@@ -106,6 +114,11 @@ export default function NewMatchPage() {
       {/* Game Type */}
       <Card className="mb-4">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Game Type</h3>
+        {isLoading ? (
+          <div className="text-center py-4 text-sm text-gray-400">Loading game types...</div>
+        ) : gameTypes.length === 0 ? (
+          <div className="text-center py-4 text-sm text-gray-400">No game types found. Try refreshing.</div>
+        ) : null}
         <div className="grid grid-cols-2 gap-2">
           {gameTypes.map((gt) => (
             <button
@@ -186,63 +199,110 @@ export default function NewMatchPage() {
           </button>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
-            <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-              {players.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedPlayer1(p.id)}
-                  disabled={p.id === selectedPlayer2}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                    selectedPlayer1 === p.id
-                      ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
-                      : p.id === selectedPlayer2
-                      ? 'opacity-30 cursor-not-allowed'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                  }`}
-                >
-                  <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                  <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                    {p.display_name}
-                  </span>
-                </button>
-              ))}
+        {players.length === 0 ? (
+          <div className="text-center py-6">
+            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+              <UserPlus className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+            </div>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">No players yet</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">Add at least two players to start a match</p>
+            <Button
+              variant="primary"
+              onClick={() => setShowNewPlayer(true)}
+              className="mx-auto"
+            >
+              <UserPlus className="w-4 h-4 mr-2" /> Add Your First Player
+            </Button>
+          </div>
+        ) : players.length === 1 ? (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
+              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
+                {players.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPlayer1(p.id)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                      selectedPlayer1 === p.id
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                    }`}
+                  >
+                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                      {p.display_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="text-center py-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Add one more player to start a match</p>
+              <Button variant="primary" size="sm" onClick={() => setShowNewPlayer(true)}>
+                <UserPlus className="w-4 h-4 mr-1" /> Add Player 2
+              </Button>
             </div>
           </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
+              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
+                {players.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPlayer1(p.id)}
+                    disabled={p.id === selectedPlayer2}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                      selectedPlayer1 === p.id
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
+                        : p.id === selectedPlayer2
+                        ? 'opacity-30 cursor-not-allowed'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                    }`}
+                  >
+                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                      {p.display_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-            <span className="text-xs font-bold text-gray-400">VS</span>
-            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-          </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+              <span className="text-xs font-bold text-gray-400">VS</span>
+              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+            </div>
 
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 2</label>
-            <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-              {players.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedPlayer2(p.id)}
-                  disabled={p.id === selectedPlayer1}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                    selectedPlayer2 === p.id
-                      ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
-                      : p.id === selectedPlayer1
-                      ? 'opacity-30 cursor-not-allowed'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                  }`}
-                >
-                  <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                  <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                    {p.display_name}
-                  </span>
-                </button>
-              ))}
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 2</label>
+              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
+                {players.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPlayer2(p.id)}
+                    disabled={p.id === selectedPlayer1}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                      selectedPlayer2 === p.id
+                        ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
+                        : p.id === selectedPlayer1
+                        ? 'opacity-30 cursor-not-allowed'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                    }`}
+                  >
+                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                      {p.display_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </Card>
 
       {/* Start Button */}
