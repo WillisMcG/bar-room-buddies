@@ -10,9 +10,10 @@ import Card from '@/components/ui/Card';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import { db, getDeviceId } from '@/lib/db/dexie';
-import type { LocalSession, LocalSessionGame, LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import type { LocalSession, LocalSessionGame, LocalProfile, LocalGameType, LocalTeam, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDuration, formatDateTime } from '@/lib/utils';
+import { normalizeTeamKey, findOrCreateTeam } from '@/lib/team-utils';
 
 function TallyMarks({ count }: { count: number }) {
   const groups = Math.floor(count / 5);
@@ -59,9 +60,17 @@ export default function SessionPage() {
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addTeamPlayer1, setAddTeamPlayer1] = useState('');
   const [addTeamPlayer2, setAddTeamPlayer2] = useState('');
+  // Map of "normalizedP1-normalizedP2" -> team name
+  const [teamNameMap, setTeamNameMap] = useState<Map<string, string>>(new Map());
 
   // Helper to check if session is doubles mode
   const isDoubles = session?.session_mode === 'doubles' || session?.session_mode === 'scotch_doubles';
+
+  // Lookup team name for a pair of player IDs
+  const getTeamName = useCallback((playerA: string, playerB: string): string | null => {
+    const [p1, p2] = normalizeTeamKey(playerA, playerB);
+    return teamNameMap.get(`${p1}-${p2}`) || null;
+  }, [teamNameMap]);
 
   const loadSession = useCallback(async () => {
     const s = await db.sessions.get(sessionId);
@@ -83,6 +92,19 @@ export default function SessionPage() {
       if (p) profileMap.set(pid, p);
     }
     setProfiles(profileMap);
+
+    // Resolve team names for all doubles teams
+    if ((s.session_mode === 'doubles' || s.session_mode === 'scotch_doubles') && s.teams?.length > 0) {
+      const nameMap = new Map<string, string>();
+      for (const team of s.teams) {
+        const [p1, p2] = normalizeTeamKey(team[0], team[1]);
+        const key = `${p1}-${p2}`;
+        const teamRecord = await findOrCreateTeam(team[0], team[1], s.venue_id);
+        nameMap.set(key, teamRecord.team_name);
+      }
+      setTeamNameMap(nameMap);
+    }
+
     setIsLoading(false);
   }, [sessionId]);
 
@@ -123,13 +145,15 @@ export default function SessionPage() {
         .map(team => {
           const p1Name = profiles.get(team[0])?.display_name || 'Unknown';
           const p2Name = profiles.get(team[1])?.display_name || 'Unknown';
-          const teamName = `${p1Name} & ${p2Name}`;
+          const persistentName = getTeamName(team[0], team[1]);
+          const teamName = persistentName || `${p1Name} & ${p2Name}`;
+          const playerNames = `${p1Name} & ${p2Name}`;
           const p1Wins = winCounts.get(team[0]) || 0;
-          const p2Wins = winCounts.get(team[1]) || 0;
           // Team wins = wins of first team member (they both have same count if tracking correctly)
           return {
             id: `${team[0]}-${team[1]}`, // unique team id
             name: teamName,
+            playerNames,
             team,
             avatarUrl: profiles.get(team[0])?.avatar_url || null,
             avatar2Url: profiles.get(team[1])?.avatar_url || null,
@@ -332,7 +356,11 @@ export default function SessionPage() {
   const loadAvailablePlayers = async () => {
     const allProfiles = await db.profiles.toArray();
     const currentIds = new Set(session?.participant_ids || []);
-    setAvailablePlayers(allProfiles.filter(p => !p.merged_into && !currentIds.has(p.id)));
+    setAvailablePlayers(
+      allProfiles
+        .filter(p => !p.merged_into && !currentIds.has(p.id))
+        .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    );
   };
 
   const openManagePlayers = async () => {
@@ -353,7 +381,11 @@ export default function SessionPage() {
     const allProfiles = await db.profiles.toArray();
     const updatedSession = await db.sessions.get(sessionId);
     const currentIds = new Set(updatedSession?.participant_ids || []);
-    setAvailablePlayers(allProfiles.filter(p => !p.merged_into && !currentIds.has(p.id)));
+    setAvailablePlayers(
+      allProfiles
+        .filter(p => !p.merged_into && !currentIds.has(p.id))
+        .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    );
   };
 
   const createAndAddPlayer = async () => {
@@ -396,6 +428,8 @@ export default function SessionPage() {
   const addTeamToSession = async () => {
     if (!session || !addTeamPlayer1 || !addTeamPlayer2 || addTeamPlayer1 === addTeamPlayer2) return;
     const team: [string, string] = [addTeamPlayer1, addTeamPlayer2];
+    // Ensure persistent team record exists
+    await findOrCreateTeam(addTeamPlayer1, addTeamPlayer2, session.venue_id);
     await db.sessions.update(sessionId, {
       participant_ids: Array.from(new Set([...session.participant_ids, ...team])),
       teams: [...(session.teams || []), team],
@@ -674,7 +708,12 @@ export default function SessionPage() {
                   size="md"
                 />
               </div>
-              <div className="text-sm font-bold text-gray-900 dark:text-white truncate">
+              {getTeamName(session.table_team_ids[0][0], session.table_team_ids[0][1]) && (
+                <div className="text-xs font-bold text-blue-600 dark:text-blue-400 mb-1 truncate">
+                  {getTeamName(session.table_team_ids[0][0], session.table_team_ids[0][1])}
+                </div>
+              )}
+              <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
                 {profiles.get(session.table_team_ids[0][0])?.display_name} &<br />
                 {profiles.get(session.table_team_ids[0][1])?.display_name}
               </div>
@@ -703,7 +742,12 @@ export default function SessionPage() {
                   size="md"
                 />
               </div>
-              <div className="text-sm font-bold text-gray-900 dark:text-white truncate">
+              {getTeamName(session.table_team_ids[1][0], session.table_team_ids[1][1]) && (
+                <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-1 truncate">
+                  {getTeamName(session.table_team_ids[1][0], session.table_team_ids[1][1])}
+                </div>
+              )}
+              <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
                 {profiles.get(session.table_team_ids[1][0])?.display_name} &<br />
                 {profiles.get(session.table_team_ids[1][1])?.display_name}
               </div>
