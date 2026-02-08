@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: 'Home', icon: Home },
-  { href: '/match/new', label: 'Play', icon: Target },
+  { href: '/play', label: 'Play', icon: Target },
   { href: '/players', label: 'Players', icon: Users },
   { href: '/leaderboard', label: 'Ranks', icon: Trophy },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -23,6 +23,8 @@ export default function BottomNav() {
           const isActive =
             item.href === '/'
               ? pathname === '/'
+              : item.href === '/play'
+              ? pathname.startsWith('/play') || pathname.startsWith('/match') || pathname.startsWith('/session')
               : pathname.startsWith(item.href);
 
           return (

@@ -12,7 +12,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { db } from '@/lib/db/dexie';
 import { seedSystemGameTypes } from '@/lib/db/dexie';
 import { formatDateTime, matchFormatLabel } from '@/lib/utils';
-import type { LocalMatch, LocalProfile, LocalGameType } from '@/lib/db/dexie';
+import type { LocalMatch, LocalProfile, LocalGameType, LocalSession } from '@/lib/db/dexie';
 
 interface RecentMatch extends LocalMatch {
   player1?: LocalProfile;
@@ -22,6 +22,7 @@ interface RecentMatch extends LocalMatch {
 
 export default function HomePage() {
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
+  const [activeSessions, setActiveSessions] = useState<(LocalSession & { gameType?: LocalGameType; playerNames: string[] })[]>([]);
   const [playerCount, setPlayerCount] = useState(0);
   const [matchCount, setMatchCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,6 +49,22 @@ export default function HomePage() {
       );
 
       setRecentMatches(enriched);
+
+      // Load active sessions
+      const sessions = await db.sessions.where('status').equals('active').toArray();
+      const enrichedSessions = await Promise.all(
+        sessions.map(async (s) => {
+          const gt = await db.gameTypes.get(s.game_type_id);
+          const names: string[] = [];
+          for (const pid of s.participant_ids) {
+            const p = await db.profiles.get(pid);
+            if (p) names.push(p.display_name);
+          }
+          return { ...s, gameType: gt, playerNames: names };
+        })
+      );
+      setActiveSessions(enrichedSessions);
+
       setPlayerCount(await db.profiles.count());
       setMatchCount(await db.matches.where('status').equals('completed').count());
       setIsLoading(false);
@@ -68,13 +85,44 @@ export default function HomePage() {
             Pool scorekeeping &amp; stats
           </p>
         </div>
-        <Link href="/match/new">
+        <Link href="/play">
           <Button variant="accent" size="xl" className="w-full rounded-xl">
             <Target className="w-5 h-5 mr-2" />
-            Start New Match
+            Play
           </Button>
         </Link>
       </div>
+
+      {/* Active Sessions */}
+      {activeSessions.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide mb-3">
+            Active Sessions
+          </h2>
+          <div className="space-y-2">
+            {activeSessions.map((s) => (
+              <Link key={s.id} href={`/session/${s.id}`}>
+                <Card padding="sm" className="hover:border-orange-500/50 transition-colors cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {s.gameType?.name || 'Session'}
+                        </span>
+                        <Badge variant="warning">Live</Badge>
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        {s.playerNames.join(', ')}
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  </div>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">

@@ -65,6 +65,33 @@ export interface LocalVenue {
   synced: boolean;
 }
 
+export interface LocalSession {
+  id: string;
+  game_type_id: string;
+  status: 'active' | 'completed';
+  started_at: string;
+  completed_at: string | null;
+  participant_ids: string[];          // All player IDs in this session
+  table_player_ids: [string, string]; // The two currently playing
+  waiting_queue: string[];            // Rotation order of waiting players
+  venue_id: string | null;
+  synced: boolean;
+  local_updated_at: string;
+}
+
+export interface LocalSessionGame {
+  id: string;
+  session_id: string;
+  game_number: number;
+  player_1_id: string;
+  player_2_id: string;
+  winner_id: string;
+  completed_at: string;
+  prev_table_players: [string, string]; // Snapshot for undo
+  prev_queue: string[];                 // Snapshot for undo
+  synced: boolean;
+}
+
 export interface SyncMeta {
   key: string;
   value: string;
@@ -79,6 +106,8 @@ class BarRoomBuddiesDB extends Dexie {
   games!: EntityTable<LocalGame, 'id'>;
   venues!: EntityTable<LocalVenue, 'id'>;
   syncMeta!: EntityTable<SyncMeta, 'key'>;
+  sessions!: EntityTable<LocalSession, 'id'>;
+  sessionGames!: EntityTable<LocalSessionGame, 'id'>;
 
   constructor() {
     super('BarRoomBuddiesDB');
@@ -90,6 +119,17 @@ class BarRoomBuddiesDB extends Dexie {
       games: 'id, match_id, game_number, winner_id, synced',
       venues: 'id, owner_id, synced',
       syncMeta: 'key',
+    });
+
+    this.version(2).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
     });
   }
 }
