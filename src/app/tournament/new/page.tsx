@@ -11,6 +11,7 @@ import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   assignSeeds,
   generateSingleElimBracket,
@@ -25,6 +26,7 @@ type TournamentFormat = 'single_elimination' | 'double_elimination';
 
 export default function NewTournamentPage() {
   const router = useRouter();
+  const { venueId } = useAuth();
 
   // Data
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
@@ -164,6 +166,7 @@ export default function NewTournamentPage() {
       merged_into: null,
       created_at: new Date().toISOString(),
       synced: false,
+      venue_id: venueId,
     };
     await db.profiles.add(newPlayer);
     setPlayers(prev => [...prev, newPlayer].sort((a, b) => a.display_name.localeCompare(b.display_name)));
@@ -254,7 +257,7 @@ export default function NewTournamentPage() {
         started_at: now,
         completed_at: null,
         winner_id: null,
-        venue_id: null,
+        venue_id: venueId,
         synced: false,
         local_updated_at: now,
       });
@@ -814,7 +817,7 @@ export default function NewTournamentPage() {
                   {tournamentName.trim() || `${gameTypes.find(g => g.id === selectedGameType)?.name || 'Pool'} Tournament`}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {tournamentFormat === 'single_elimination' ? 'Single' : 'Double'} Elimination •{' '}
+                  {tournamentFormat === 'single_elimination' ? 'Single' : 'Double'} Elimination • {' '}
                   {matchMode === 'singles' ? 'Singles' : matchMode === 'doubles' ? 'Doubles' : 'Scotch Doubles'}
                 </p>
               </div>
