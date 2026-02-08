@@ -293,6 +293,11 @@ export default function MatchPage() {
           )}
 
           <div className="mt-4 space-y-2">
+            {isComplete && games.length > 0 && (
+              <Button variant="secondary" className="w-full" onClick={undoLastGame}>
+                <Undo2 className="w-4 h-4 mr-1" /> Undo Last Game
+              </Button>
+            )}
             <Button variant="accent" className="w-full" onClick={() => router.push('/match/new')}>
               New Match
             </Button>
