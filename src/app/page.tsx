@@ -37,7 +37,7 @@ export default function HomePage() {
         .orderBy('started_at')
         .reverse()
         .toArray();
-      const filteredMatches = venueId ? allMatches.filter(m => m.venue_id === venueId) : allMatches;
+      const filteredMatches = venueId ? allMatches.filter(m => m.venue_id === venueId || !m.venue_id) : allMatches;
       const matches = filteredMatches.slice(0, 5);
 
       const enriched = await Promise.all(
@@ -55,7 +55,7 @@ export default function HomePage() {
 
       // Load active sessions
       const allSessions = await db.sessions.where('status').equals('active').toArray();
-      const sessions = venueId ? allSessions.filter(s => s.venue_id === venueId) : allSessions;
+      const sessions = venueId ? allSessions.filter(s => s.venue_id === venueId || !s.venue_id) : allSessions;
       const enrichedSessions = await Promise.all(
         sessions.map(async (s) => {
           const gt = await db.gameTypes.get(s.game_type_id);
@@ -71,12 +71,12 @@ export default function HomePage() {
 
       // Get player count filtered by venue
       const allProfiles = await db.profiles.toArray();
-      const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId) : allProfiles;
+      const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId || !p.venue_id) : allProfiles;
       setPlayerCount(venueProfiles.length);
 
       // Get match count filtered by venue
       const allCompletedMatches = await db.matches.where('status').equals('completed').toArray();
-      const venueMatches = venueId ? allCompletedMatches.filter(m => m.venue_id === venueId) : allCompletedMatches;
+      const venueMatches = venueId ? allCompletedMatches.filter(m => m.venue_id === venueId || !m.venue_id) : allCompletedMatches;
       setMatchCount(venueMatches.length);
 
       setIsLoading(false);

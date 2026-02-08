@@ -29,7 +29,7 @@ export default function MatchesPage() {
         .reverse()
         .toArray();
       const filtered = venueId
-        ? allMatches.filter((m) => m.venue_id === venueId)
+        ? allMatches.filter((m) => m.venue_id === venueId || !m.venue_id)
         : allMatches;
 
       const enriched = await Promise.all(

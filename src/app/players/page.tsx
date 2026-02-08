@@ -34,7 +34,7 @@ export default function PlayersPage() {
 
   const loadPlayers = async () => {
     const allProfiles = await db.profiles.toArray();
-    const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId) : allProfiles;
+    const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId || !p.venue_id) : allProfiles;
     const active = venueProfiles.filter((p) => !p.merged_into);
 
     // Pre-load all session games once to avoid repeated queries
