@@ -9,7 +9,9 @@ import Card from '@/components/ui/Card';
 import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { db } from '@/lib/db/dexie';
+import type { LocalTeam } from '@/lib/db/dexie';
 import { matchFormatLabel, formatDuration } from '@/lib/utils';
+import { normalizeTeamKey } from '@/lib/team-utils';
 import type { LocalMatch, LocalProfile, LocalGameType, LocalGame, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -23,6 +25,8 @@ export default function MatchPage() {
   const [player2Partner, setPlayer2Partner] = useState<LocalProfile | null>(null);
   const [gameType, setGameType] = useState<LocalGameType | null>(null);
   const [games, setGames] = useState<LocalGame[]>([]);
+  const [team1Data, setTeam1Data] = useState<LocalTeam | null>(null);
+  const [team2Data, setTeam2Data] = useState<LocalTeam | null>(null);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -47,6 +51,19 @@ export default function MatchPage() {
     setPlayer2Partner(p2Partner || null);
     setGameType(gt || null);
     setGames(g);
+
+    // Load team names for doubles matches
+    if (m.match_mode !== 'singles' && m.player_1_partner_id) {
+      const [k1a, k1b] = normalizeTeamKey(m.player_1_id, m.player_1_partner_id);
+      const t1 = await db.teams.where('[player_1_id+player_2_id]').equals([k1a, k1b]).first();
+      setTeam1Data(t1 || null);
+    }
+    if (m.match_mode !== 'singles' && m.player_2_partner_id) {
+      const [k2a, k2b] = normalizeTeamKey(m.player_2_id, m.player_2_partner_id);
+      const t2 = await db.teams.where('[player_1_id+player_2_id]').equals([k2a, k2b]).first();
+      setTeam2Data(t2 || null);
+    }
+
     setIsLoading(false);
   }, [id]);
 
@@ -171,9 +188,10 @@ export default function MatchPage() {
     const winnerPrimary = winnerIsTeam1 ? player1 : player2;
     const winnerPartner = winnerIsTeam1 ? player1Partner : player2Partner;
 
-    const getTeamName = (primary: LocalProfile | null, partner: LocalProfile | null): string => {
+    const getTeamName = (primary: LocalProfile | null, partner: LocalProfile | null, teamData: LocalTeam | null): string => {
       if (!primary) return '';
       if (isDoubles && partner) {
+        if (teamData) return teamData.team_name;
         return `${primary.display_name} & ${partner.display_name}`;
       }
       return primary.display_name;
@@ -202,7 +220,7 @@ export default function MatchPage() {
                         <Avatar name={winnerPartner.display_name} imageUrl={winnerPartner.avatar_url} size="md" />
                       )}
                     </div>
-                    <span className="text-xl font-bold text-gray-900 dark:text-white">{getTeamName(winnerPrimary || null, winnerPartner)}</span>
+                    <span className="text-xl font-bold text-gray-900 dark:text-white">{getTeamName(winnerPrimary || null, winnerPartner, winnerIsTeam1 ? team1Data : team2Data)}</span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-center gap-2 mt-1">
@@ -229,7 +247,7 @@ export default function MatchPage() {
                         <Avatar name={player1Partner.display_name} imageUrl={player1Partner.avatar_url} size="lg" />
                       )}
                     </div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player1, player1Partner)}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player1, player1Partner, team1Data)}</p>
                   </>
                 ) : (
                   <>
@@ -250,7 +268,7 @@ export default function MatchPage() {
                         <Avatar name={player2Partner.display_name} imageUrl={player2Partner.avatar_url} size="lg" />
                       )}
                     </div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player2, player2Partner)}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player2, player2Partner, team2Data)}</p>
                   </>
                 ) : (
                   <>
@@ -277,7 +295,7 @@ export default function MatchPage() {
                 {games.map((g) => {
                   const isTeam1Winner = g.winner_id === player1?.id;
                   const winnerName = isDoubles
-                    ? getTeamName(isTeam1Winner ? player1 : player2, isTeam1Winner ? player1Partner : player2Partner)
+                    ? getTeamName(isTeam1Winner ? player1 : player2, isTeam1Winner ? player1Partner : player2Partner, isTeam1Winner ? team1Data : team2Data)
                     : (isTeam1Winner ? player1?.display_name : player2?.display_name);
                   return (
                     <div key={g.id} className="flex items-center justify-between text-sm py-1">
@@ -337,7 +355,10 @@ export default function MatchPage() {
                   <Avatar name={player1Partner.display_name} imageUrl={player1Partner.avatar_url} size="lg" />
                 )}
               </div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <span className="text-sm font-bold text-blue-700 dark:text-blue-300 mb-1">
+                {team1Data?.team_name || ''}
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                 {player1.display_name} {player1Partner ? `& ${player1Partner.display_name}` : ''}
               </span>
             </>
@@ -371,7 +392,10 @@ export default function MatchPage() {
                   <Avatar name={player2Partner.display_name} imageUrl={player2Partner.avatar_url} size="lg" />
                 )}
               </div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <span className="text-sm font-bold text-red-700 dark:text-red-300 mb-1">
+                {team2Data?.team_name || ''}
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                 {player2.display_name} {player2Partner ? `& ${player2Partner.display_name}` : ''}
               </span>
             </>
