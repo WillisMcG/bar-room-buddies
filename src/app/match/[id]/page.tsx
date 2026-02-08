@@ -10,7 +10,7 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { db } from '@/lib/db/dexie';
 import { matchFormatLabel, formatDuration } from '@/lib/utils';
-import type { LocalMatch, LocalProfile, LocalGameType, LocalGame } from '@/lib/db/dexie';
+import type { LocalMatch, LocalProfile, LocalGameType, LocalGame, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function MatchPage() {
@@ -19,6 +19,8 @@ export default function MatchPage() {
   const [match, setMatch] = useState<LocalMatch | null>(null);
   const [player1, setPlayer1] = useState<LocalProfile | null>(null);
   const [player2, setPlayer2] = useState<LocalProfile | null>(null);
+  const [player1Partner, setPlayer1Partner] = useState<LocalProfile | null>(null);
+  const [player2Partner, setPlayer2Partner] = useState<LocalProfile | null>(null);
   const [gameType, setGameType] = useState<LocalGameType | null>(null);
   const [games, setGames] = useState<LocalGame[]>([]);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -29,16 +31,20 @@ export default function MatchPage() {
     const m = await db.matches.get(id);
     if (!m) return;
 
-    const [p1, p2, gt, g] = await Promise.all([
+    const [p1, p2, gt, g, p1Partner, p2Partner] = await Promise.all([
       db.profiles.get(m.player_1_id),
       db.profiles.get(m.player_2_id),
       db.gameTypes.get(m.game_type_id),
       db.games.where('match_id').equals(id).sortBy('game_number'),
+      m.player_1_partner_id ? db.profiles.get(m.player_1_partner_id) : Promise.resolve(null),
+      m.player_2_partner_id ? db.profiles.get(m.player_2_partner_id) : Promise.resolve(null),
     ]);
 
     setMatch(m);
     setPlayer1(p1 || null);
     setPlayer2(p2 || null);
+    setPlayer1Partner(p1Partner || null);
+    setPlayer2Partner(p2Partner || null);
     setGameType(gt || null);
     setGames(g);
     setIsLoading(false);
@@ -158,7 +164,21 @@ export default function MatchPage() {
 
   // Completed match summary view
   if (isComplete || isAbandoned) {
-    const winner = match.winner_id === player1.id ? player1 : player2;
+    const isDoubles = match.match_mode === 'doubles' || match.match_mode === 'scotch_doubles';
+
+    // Determine winner team
+    const winnerIsTeam1 = match.winner_id === player1?.id;
+    const winnerPrimary = winnerIsTeam1 ? player1 : player2;
+    const winnerPartner = winnerIsTeam1 ? player1Partner : player2Partner;
+
+    const getTeamName = (primary: LocalProfile | null, partner: LocalProfile | null): string => {
+      if (!primary) return '';
+      if (isDoubles && partner) {
+        return `${primary.display_name} & ${partner.display_name}`;
+      }
+      return primary.display_name;
+    };
+
     return (
       <div className="min-h-screen pb-20 pt-2">
         <div className="max-w-lg mx-auto px-4">
@@ -174,10 +194,22 @@ export default function MatchPage() {
               <div className="mb-4">
                 <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-2" />
                 <p className="text-sm text-gray-500 dark:text-gray-400">Winner</p>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  <Avatar name={winner.display_name} imageUrl={winner.avatar_url} size="md" />
-                  <span className="text-xl font-bold text-gray-900 dark:text-white">{winner.display_name}</span>
-                </div>
+                {isDoubles ? (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                      <Avatar name={winnerPrimary?.display_name || ''} imageUrl={winnerPrimary?.avatar_url || null} size="md" />
+                      {winnerPartner && (
+                        <Avatar name={winnerPartner.display_name} imageUrl={winnerPartner.avatar_url} size="md" />
+                      )}
+                    </div>
+                    <span className="text-xl font-bold text-gray-900 dark:text-white">{getTeamName(winnerPrimary || null, winnerPartner)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 mt-1">
+                    <Avatar name={winnerPrimary?.display_name || ''} imageUrl={winnerPrimary?.avatar_url || null} size="md" />
+                    <span className="text-xl font-bold text-gray-900 dark:text-white">{winnerPrimary?.display_name}</span>
+                  </div>
+                )}
               </div>
             )}
             {isAbandoned && (
@@ -189,20 +221,48 @@ export default function MatchPage() {
             {/* Score display */}
             <div className="flex items-center justify-center gap-6 py-4">
               <div className="text-center">
-                <Avatar name={player1.display_name} imageUrl={player1.avatar_url} size="lg" className="mx-auto mb-2" />
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{player1.display_name}</p>
+                {isDoubles ? (
+                  <>
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <Avatar name={player1?.display_name || ''} imageUrl={player1?.avatar_url || null} size="lg" />
+                      {player1Partner && (
+                        <Avatar name={player1Partner.display_name} imageUrl={player1Partner.avatar_url} size="lg" />
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player1, player1Partner)}</p>
+                  </>
+                ) : (
+                  <>
+                    <Avatar name={player1?.display_name || ''} imageUrl={player1?.avatar_url || null} size="lg" className="mx-auto mb-2" />
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{player1?.display_name}</p>
+                  </>
+                )}
               </div>
               <div className="text-3xl font-black text-gray-900 dark:text-white">
                 {match.player_1_score} <span className="text-gray-400">-</span> {match.player_2_score}
               </div>
               <div className="text-center">
-                <Avatar name={player2.display_name} imageUrl={player2.avatar_url} size="lg" className="mx-auto mb-2" />
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{player2.display_name}</p>
+                {isDoubles ? (
+                  <>
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <Avatar name={player2?.display_name || ''} imageUrl={player2?.avatar_url || null} size="lg" />
+                      {player2Partner && (
+                        <Avatar name={player2Partner.display_name} imageUrl={player2Partner.avatar_url} size="lg" />
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{getTeamName(player2, player2Partner)}</p>
+                  </>
+                ) : (
+                  <>
+                    <Avatar name={player2?.display_name || ''} imageUrl={player2?.avatar_url || null} size="lg" className="mx-auto mb-2" />
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{player2?.display_name}</p>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t border-gray-200 dark:border-gray-700">
-              <p>{gameType?.name} &middot; {matchFormatLabel(match.format, match.format_target)}</p>
+              <p>{gameType?.name} &middot; {isDoubles ? (match.match_mode === 'scotch_doubles' ? 'Scotch Doubles' : 'Doubles') : 'Singles'} &middot; {matchFormatLabel(match.format, match.format_target)}</p>
               {match.completed_at && (
                 <p>Duration: {formatDuration(match.started_at, match.completed_at)}</p>
               )}
@@ -214,14 +274,20 @@ export default function MatchPage() {
             <Card>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Game Log</h3>
               <div className="space-y-1">
-                {games.map((g) => (
-                  <div key={g.id} className="flex items-center justify-between text-sm py-1">
-                    <span className="text-gray-500 dark:text-gray-400">Game {g.game_number}</span>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {g.winner_id === player1.id ? player1.display_name : player2.display_name}
-                    </span>
-                  </div>
-                ))}
+                {games.map((g) => {
+                  const isTeam1Winner = g.winner_id === player1?.id;
+                  const winnerName = isDoubles
+                    ? getTeamName(isTeam1Winner ? player1 : player2, isTeam1Winner ? player1Partner : player2Partner)
+                    : (isTeam1Winner ? player1?.display_name : player2?.display_name);
+                  return (
+                    <div key={g.id} className="flex items-center justify-between text-sm py-1">
+                      <span className="text-gray-500 dark:text-gray-400">Game {g.game_number}</span>
+                      <span className="font-medium text-gray-900 dark:text-white">
+                        {winnerName}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           )}
@@ -240,12 +306,14 @@ export default function MatchPage() {
   }
 
   // Live scorekeeping view
+  const isDoubles = match?.match_mode === 'doubles' || match?.match_mode === 'scotch_doubles';
+
   return (
     <div className="min-h-screen pb-20">
       {/* Game info bar */}
       <div className="bg-gray-100 dark:bg-gray-900 px-4 py-2 text-center">
         <div className="text-xs text-gray-500 dark:text-gray-400">
-          {gameType?.name} &middot; {matchFormatLabel(match.format, match.format_target)}
+          {gameType?.name} &middot; {isDoubles ? (match?.match_mode === 'scotch_doubles' ? 'Scotch Doubles' : 'Doubles') : 'Singles'} &middot; {matchFormatLabel(match.format, match.format_target)}
         </div>
       </div>
 
@@ -256,8 +324,24 @@ export default function MatchPage() {
           onClick={() => scoreGame(match.player_1_id)}
           className="flex-1 flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-950/30 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors select-none"
         >
-          <Avatar name={player1.display_name} imageUrl={player1.avatar_url} size="xl" className="mb-3" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{player1.display_name}</span>
+          {isDoubles ? (
+            <>
+              <div className="flex items-center gap-2 mb-3">
+                <Avatar name={player1.display_name} imageUrl={player1.avatar_url} size="lg" />
+                {player1Partner && (
+                  <Avatar name={player1Partner.display_name} imageUrl={player1Partner.avatar_url} size="lg" />
+                )}
+              </div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {player1.display_name} {player1Partner ? `& ${player1Partner.display_name}` : ''}
+              </span>
+            </>
+          ) : (
+            <>
+              <Avatar name={player1.display_name} imageUrl={player1.avatar_url} size="xl" className="mb-3" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{player1.display_name}</span>
+            </>
+          )}
           <span className="text-7xl font-black text-gray-900 dark:text-white">{match.player_1_score}</span>
           <span className="text-xs text-gray-400 mt-2">Tap to score</span>
         </button>
@@ -274,8 +358,24 @@ export default function MatchPage() {
           onClick={() => scoreGame(match.player_2_id)}
           className="flex-1 flex flex-col items-center justify-center p-4 bg-red-50 dark:bg-red-950/30 active:bg-red-100 dark:active:bg-red-900/40 transition-colors select-none"
         >
-          <Avatar name={player2.display_name} imageUrl={player2.avatar_url} size="xl" className="mb-3" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{player2.display_name}</span>
+          {isDoubles ? (
+            <>
+              <div className="flex items-center gap-2 mb-3">
+                <Avatar name={player2.display_name} imageUrl={player2.avatar_url} size="lg" />
+                {player2Partner && (
+                  <Avatar name={player2Partner.display_name} imageUrl={player2Partner.avatar_url} size="lg" />
+                )}
+              </div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {player2.display_name} {player2Partner ? `& ${player2Partner.display_name}` : ''}
+              </span>
+            </>
+          ) : (
+            <>
+              <Avatar name={player2.display_name} imageUrl={player2.avatar_url} size="xl" className="mb-3" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{player2.display_name}</span>
+            </>
+          )}
           <span className="text-7xl font-black text-gray-900 dark:text-white">{match.player_2_score}</span>
           <span className="text-xs text-gray-400 mt-2">Tap to score</span>
         </button>

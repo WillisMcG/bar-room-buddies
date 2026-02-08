@@ -54,11 +54,14 @@ export default function LeaderboardPage() {
       const results: LeaderboardEntry[] = [];
 
       for (const p of profiles) {
-        // 1v1 match stats
+        // Match stats (includes doubles — check partner IDs too)
         let matches = await db.matches
           .where('status')
           .equals('completed')
-          .filter((m) => m.player_1_id === p.id || m.player_2_id === p.id)
+          .filter((m) =>
+            m.player_1_id === p.id || m.player_2_id === p.id ||
+            m.player_1_partner_id === p.id || m.player_2_partner_id === p.id
+          )
           .toArray();
 
         if (selectedGameType !== 'all') {
@@ -69,12 +72,17 @@ export default function LeaderboardPage() {
           matches = matches.filter((m) => (m.completed_at || '') >= cutoff);
         }
 
-        const matchWins = matches.filter((m) => m.winner_id === p.id).length;
+        const matchWins = matches.filter((m) => {
+          const onTeam1 = m.player_1_id === p.id || m.player_1_partner_id === p.id;
+          const team1Won = m.winner_id === m.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
         const matchLosses = matches.length - matchWins;
 
-        // Open Table session stats
+        // Session stats (includes doubles — check partner IDs too)
         let sessionGames = allSessionGames.filter(
-          (g) => g.player_1_id === p.id || g.player_2_id === p.id
+          (g) => g.player_1_id === p.id || g.player_2_id === p.id ||
+                 g.player_1_partner_id === p.id || g.player_2_partner_id === p.id
         );
 
         if (selectedGameType !== 'all') {
@@ -88,7 +96,11 @@ export default function LeaderboardPage() {
           sessionGames = sessionGames.filter((g) => g.completed_at >= cutoff);
         }
 
-        const sessionWins = sessionGames.filter((g) => g.winner_id === p.id).length;
+        const sessionWins = sessionGames.filter((g) => {
+          const onTeam1 = g.player_1_id === p.id || g.player_1_partner_id === p.id;
+          const team1Won = g.winner_id === g.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
         const sessionLosses = sessionGames.length - sessionWins;
 
         const wins = matchWins + sessionWins;
