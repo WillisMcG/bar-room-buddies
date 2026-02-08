@@ -46,9 +46,15 @@ export default function LeaderboardPage() {
         ? new Date(Date.now() - parseInt(timePeriod) * 24 * 60 * 60 * 1000).toISOString()
         : null;
 
+      // Pre-load session data for combining with match stats
+      const allSessionGames = await db.sessionGames.toArray();
+      const allSessions = await db.sessions.toArray();
+      const sessionMap = new Map(allSessions.map(s => [s.id, s]));
+
       const results: LeaderboardEntry[] = [];
 
       for (const p of profiles) {
+        // 1v1 match stats
         let matches = await db.matches
           .where('status')
           .equals('completed')
@@ -63,17 +69,40 @@ export default function LeaderboardPage() {
           matches = matches.filter((m) => (m.completed_at || '') >= cutoff);
         }
 
-        if (matches.length < 3) continue;
+        const matchWins = matches.filter((m) => m.winner_id === p.id).length;
+        const matchLosses = matches.length - matchWins;
 
-        const wins = matches.filter((m) => m.winner_id === p.id).length;
-        const losses = matches.length - wins;
+        // Open Table session stats
+        let sessionGames = allSessionGames.filter(
+          (g) => g.player_1_id === p.id || g.player_2_id === p.id
+        );
+
+        if (selectedGameType !== 'all') {
+          sessionGames = sessionGames.filter((g) => {
+            const session = sessionMap.get(g.session_id);
+            return session?.game_type_id === selectedGameType;
+          });
+        }
+
+        if (cutoff) {
+          sessionGames = sessionGames.filter((g) => g.completed_at >= cutoff);
+        }
+
+        const sessionWins = sessionGames.filter((g) => g.winner_id === p.id).length;
+        const sessionLosses = sessionGames.length - sessionWins;
+
+        const wins = matchWins + sessionWins;
+        const losses = matchLosses + sessionLosses;
+        const totalGames = matches.length + sessionGames.length;
+
+        if (totalGames < 3) continue;
 
         results.push({
           profile: p,
           wins,
           losses,
           winPct: getWinPercentage(wins, losses),
-          totalMatches: matches.length,
+          totalMatches: totalGames,
         });
       }
 
@@ -98,7 +127,7 @@ export default function LeaderboardPage() {
   };
 
   return (
-    <PageWrapper title={venue.name ? `${venue.name} Rankings` : 'Leaderboard'} subtitle="Minimum 3 matches to qualify">
+    <PageWrapper title={venue.name ? `${venue.name} Rankings` : 'Leaderboard'} subtitle="Minimum 3 games to qualify">
       {/* Filters */}
       <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
         <select
@@ -146,7 +175,7 @@ export default function LeaderboardPage() {
           <EmptyState
             icon={<Trophy className="w-10 h-10" />}
             title="No rankings yet"
-            description="Players need at least 3 completed matches to appear on the leaderboard."
+            description="Players need at least 3 completed games to appear on the leaderboard."
           />
         </Card>
       ) : (
@@ -163,7 +192,7 @@ export default function LeaderboardPage() {
                     {entry.profile.display_name}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {entry.wins}W - {entry.losses}L &middot; {entry.totalMatches} matches
+                    {entry.wins}W - {entry.losses}L &middot; {entry.totalMatches} games
                   </div>
                 </div>
                 <div className="text-right">

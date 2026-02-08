@@ -34,16 +34,30 @@ export default function PlayersPage() {
     const allProfiles = await db.profiles.toArray();
     const active = allProfiles.filter((p) => !p.merged_into);
 
+    // Pre-load all session games once to avoid repeated queries
+    const allSessionGames = await db.sessionGames.toArray();
+
     const withStats = await Promise.all(
       active.map(async (p) => {
+        // 1v1 match stats
         const matches = await db.matches
           .where('status')
           .equals('completed')
           .filter((m) => m.player_1_id === p.id || m.player_2_id === p.id)
           .toArray();
 
-        const wins = matches.filter((m) => m.winner_id === p.id).length;
-        const losses = matches.length - wins;
+        const matchWins = matches.filter((m) => m.winner_id === p.id).length;
+        const matchLosses = matches.length - matchWins;
+
+        // Open Table session stats
+        const sessionGames = allSessionGames.filter(
+          (g) => g.player_1_id === p.id || g.player_2_id === p.id
+        );
+        const sessionWins = sessionGames.filter((g) => g.winner_id === p.id).length;
+        const sessionLosses = sessionGames.length - sessionWins;
+
+        const wins = matchWins + sessionWins;
+        const losses = matchLosses + sessionLosses;
 
         return {
           ...p,
