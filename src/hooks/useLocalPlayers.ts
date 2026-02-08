@@ -31,6 +31,7 @@ export function useLocalPlayers() {
       is_local: true,
       device_id: getDeviceId(),
       merged_into: null,
+      venue_id: null,
       created_at: new Date().toISOString(),
       synced: false,
     };

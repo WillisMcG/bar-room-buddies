@@ -1,28 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { User, Palette, Store, LogIn, LogOut, Moon, Sun, Info, Shield, ChevronRight, Wifi, WifiOff } from 'lucide-react';
+import { User, Store, LogOut, Moon, Sun, Info, ChevronRight, Wifi, WifiOff } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import Modal from '@/components/ui/Modal';
-import Input from '@/components/ui/Input';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useEffect } from 'react';
 
 export default function SettingsPage() {
-  const { user, profile, isAuthenticated, signUp, signIn, signOut } = useAuth();
-  const { theme, toggleTheme, venue } = useTheme();
-  const [showAuth, setShowAuth] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
+  const { user, profile, signOut, venue } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
@@ -37,26 +29,9 @@ export default function SettingsPage() {
     };
   }, []);
 
-  const handleAuth = async () => {
-    setAuthError('');
-    setIsLoading(true);
-
-    if (isSignUp) {
-      if (!displayName.trim()) {
-        setAuthError('Please enter a display name');
-        setIsLoading(false);
-        return;
-      }
-      const { error } = await signUp(email, password, displayName.trim());
-      if (error) setAuthError(error);
-      else setShowAuth(false);
-    } else {
-      const { error } = await signIn(email, password);
-      if (error) setAuthError(error);
-      else setShowAuth(false);
-    }
-
-    setIsLoading(false);
+  const handleSignOut = async () => {
+    await signOut();
+    router.push('/login');
   };
 
   return (
@@ -65,37 +40,21 @@ export default function SettingsPage() {
       <div className="mb-6">
         <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Account</h2>
         <Card padding="none">
-          {isAuthenticated ? (
-            <div className="p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                  <User className="w-5 h-5 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{profile?.display_name}</p>
-                  <p className="text-xs text-gray-500">{user?.email}</p>
-                </div>
-                <Badge variant="success" className="ml-auto">Signed In</Badge>
+          <div className="p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                <User className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
-              <Button variant="ghost" size="sm" className="w-full text-red-500" onClick={signOut}>
-                <LogOut className="w-4 h-4 mr-1" /> Sign Out
-              </Button>
-            </div>
-          ) : (
-            <div className="p-4">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                Sign in to sync your stats across devices and claim your player profile.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="primary" size="sm" className="flex-1" onClick={() => { setIsSignUp(false); setShowAuth(true); }}>
-                  <LogIn className="w-4 h-4 mr-1" /> Sign In
-                </Button>
-                <Button variant="secondary" size="sm" className="flex-1" onClick={() => { setIsSignUp(true); setShowAuth(true); }}>
-                  Sign Up
-                </Button>
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{profile?.display_name}</p>
+                <p className="text-xs text-gray-500">{user?.email}</p>
               </div>
+              <Badge variant="success" className="ml-auto">Signed In</Badge>
             </div>
-          )}
+            <Button variant="ghost" size="sm" className="w-full text-red-500" onClick={handleSignOut}>
+              <LogOut className="w-4 h-4 mr-1" /> Sign Out
+            </Button>
+          </div>
         </Card>
       </div>
 
@@ -130,7 +89,7 @@ export default function SettingsPage() {
               <Store className="w-5 h-5 text-purple-500" />
               <div>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">Venue Branding</p>
-                <p className="text-xs text-gray-500">{venue.name || 'Not configured'}</p>
+                <p className="text-xs text-gray-500">{venue?.name || 'Not configured'}</p>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -169,46 +128,6 @@ export default function SettingsPage() {
         </Card>
       </div>
 
-      {/* Auth Modal */}
-      <Modal isOpen={showAuth} onClose={() => { setShowAuth(false); setAuthError(''); }} title={isSignUp ? 'Create Account' : 'Sign In'}>
-        <div className="space-y-4">
-          {isSignUp && (
-            <Input
-              label="Display Name"
-              placeholder="Your name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoFocus
-            />
-          )}
-          <Input
-            label="Email"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoFocus={!isSignUp}
-          />
-          <Input
-            label="Password"
-            type="password"
-            placeholder="At least 6 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAuth()}
-          />
-          {authError && <p className="text-sm text-red-500">{authError}</p>}
-          <Button variant="accent" className="w-full" onClick={handleAuth} disabled={isLoading}>
-            {isLoading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
-          </Button>
-          <button
-            onClick={() => { setIsSignUp(!isSignUp); setAuthError(''); }}
-            className="w-full text-xs text-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-          >
-            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-          </button>
-        </div>
-      </Modal>
     </PageWrapper>
   );
 }

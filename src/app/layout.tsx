@@ -2,8 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
-import Header from '@/components/layout/Header';
-import BottomNav from '@/components/layout/BottomNav';
+import AppShell from '@/components/layout/AppShell';
 import AppInitializer from '@/components/AppInitializer';
 
 export const metadata: Metadata = {
@@ -39,9 +38,7 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <AppInitializer />
-            <Header />
-            <main>{children}</main>
-            <BottomNav />
+            <AppShell>{children}</AppShell>
           </AuthProvider>
         </ThemeProvider>
       </body>

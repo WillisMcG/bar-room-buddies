@@ -4,14 +4,17 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import { createClient } from '@/lib/supabase/client';
 import { db, getDeviceId } from '@/lib/db/dexie';
 import type { Profile } from '@/types';
+import type { LocalVenue } from '@/lib/db/dexie';
 import type { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
+  venue: LocalVenue | null;
+  venueId: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  signUp: (email: string, password: string, displayName: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, displayName: string, venueName?: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -22,11 +25,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [venue, setVenue] = useState<LocalVenue | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
 
+  const fetchVenue = useCallback(async (profileId: string) => {
+    try {
+      const { data } = await supabase
+        .from('venues')
+        .select('*')
+        .eq('owner_id', profileId)
+        .single();
+
+      if (data) {
+        setVenue(data as LocalVenue);
+        // Cache in local DB
+        await db.venues.put({
+          ...data,
+          logo_blob: null,
+          synced: true,
+        });
+      }
+    } catch (error) {
+      // User might not have a venue yet, which is fine
+      console.debug('Venue fetch info:', error);
+    }
+  }, [supabase]);
+
   const fetchProfile = useCallback(async (authUser: User) => {
-    // Try to get profile from Supabase
     const { data } = await supabase
       .from('profiles')
       .select('*')
@@ -41,8 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         avatar_blob: null,
         synced: true,
       });
+      // Fetch associated venue
+      await fetchVenue(data.id);
     }
-  }, [supabase]);
+  }, [supabase, fetchVenue]);
 
   const refreshProfile = useCallback(async () => {
     if (user) {
@@ -75,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setUser(null);
           setProfile(null);
+          setVenue(null);
         }
       }
     );
@@ -82,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase, fetchProfile]);
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = async (email: string, password: string, displayName: string, venueName?: string) => {
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -93,15 +122,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data.user) {
         // Create profile in Supabase
-        const { error: profileError } = await supabase.from('profiles').insert({
-          auth_user_id: data.user.id,
-          email,
-          display_name: displayName,
-          is_local: false,
-          device_id: getDeviceId(),
-        });
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            auth_user_id: data.user.id,
+            email,
+            display_name: displayName,
+            is_local: false,
+            device_id: getDeviceId(),
+          })
+          .select()
+          .single();
 
         if (profileError) return { error: profileError.message };
+
+        // Create venue if venueName is provided
+        if (venueName && profileData) {
+          const { error: venueError } = await supabase.from('venues').insert({
+            name: venueName,
+            owner_id: profileData.id,
+            accent_color: '#22c55e',
+          });
+
+          if (venueError) return { error: venueError.message };
+        }
       }
 
       return { error: null };
@@ -128,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setVenue(null);
   };
 
   return (
@@ -135,6 +180,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         profile,
+        venue,
+        venueId: venue?.id ?? null,
         isLoading,
         isAuthenticated: !!user,
         signUp,

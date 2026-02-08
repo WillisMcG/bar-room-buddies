@@ -26,7 +26,20 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Refresh the auth token
-  await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const pathname = request.nextUrl.pathname;
+  const isLoginPath = pathname.startsWith('/login');
+
+  // If user is not authenticated and not on login page, redirect to login
+  if (!user && !isLoginPath) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  // If user is authenticated and on login page, redirect to home
+  if (user && isLoginPath) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
 
   return supabaseResponse;
 }

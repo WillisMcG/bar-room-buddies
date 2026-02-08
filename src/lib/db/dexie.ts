@@ -11,6 +11,7 @@ export interface LocalProfile {
   is_local: boolean;
   device_id: string | null;
   merged_into: string | null;
+  venue_id: string | null;
   created_at: string;
   synced: boolean;
 }
@@ -267,6 +268,27 @@ class BarRoomBuddiesDB extends Dexie {
       tournamentParticipants: 'id, tournament_id, player_id, seed_position, status, synced',
       tournamentMatches: 'id, tournament_id, round_number, bracket_type, status, winner_id, synced',
       tournamentGames: 'id, tournament_match_id, game_number, winner_id, synced',
+    });
+
+    // v5: Add venue_id to profiles for venue scoping
+    this.version(5).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, venue_id, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, match_mode, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, session_mode, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
+      tournaments: 'id, game_type_id, format, match_mode, status, started_at, venue_id, synced',
+      tournamentParticipants: 'id, tournament_id, player_id, seed_position, status, synced',
+      tournamentMatches: 'id, tournament_id, round_number, bracket_type, status, winner_id, synced',
+      tournamentGames: 'id, tournament_match_id, game_number, winner_id, synced',
+    }).upgrade(tx => {
+      // Set venue_id to null for existing profiles
+      tx.table('profiles').toCollection().modify(profile => {
+        if (profile.venue_id === undefined) profile.venue_id = null;
+      });
     });
   }
 }

@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Sun, Moon, Wifi, WifiOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export default function Header() {
   const { theme, toggleTheme, venue } = useTheme();
+  const { venue: authVenue } = useAuth();
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
@@ -28,8 +30,8 @@ export default function Header() {
     <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
       <div className="flex items-center justify-between h-14 px-4 max-w-lg mx-auto">
         <Link href="/" className="flex items-center gap-2">
-          {venue.logoUrl ? (
-            <img src={venue.logoUrl} alt={venue.name || ''} className="w-7 h-7 rounded" />
+          {(authVenue?.logo_url || venue.logoUrl) ? (
+            <img src={authVenue?.logo_url || venue.logoUrl || ''} alt={authVenue?.name || venue.name || ''} className="w-7 h-7 rounded" />
           ) : (
             <div
               className="w-7 h-7 rounded flex items-center justify-center text-white font-bold text-xs"
@@ -39,7 +41,7 @@ export default function Header() {
             </div>
           )}
           <span className="font-bold text-gray-900 dark:text-white text-sm">
-            {venue.name || 'Bar Room Buddies'}
+            {authVenue?.name || venue.name || 'Bar Room Buddies'}
           </span>
         </Link>
 
