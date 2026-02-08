@@ -9,7 +9,7 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { db } from '@/lib/db/dexie';
 import { getWinPercentage, getStreakText, formatDateTime, matchFormatLabel } from '@/lib/utils';
-import type { LocalProfile, LocalMatch, LocalGameType } from '@/lib/db/dexie';
+import type { LocalProfile, LocalMatch, LocalGameType, LocalSessionGame } from '@/lib/db/dexie';
 
 interface HeadToHeadRecord {
   opponent: LocalProfile;
@@ -38,7 +38,7 @@ export default function PlayerProfilePage() {
     if (!p) return;
     setPlayer(p);
 
-    // Get completed matches
+    // Get completed 1v1 matches
     const matches = await db.matches
       .where('status')
       .equals('completed')
@@ -47,20 +47,39 @@ export default function PlayerProfilePage() {
 
     matches.sort((a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime());
 
-    const wins = matches.filter((m) => m.winner_id === id).length;
-    const losses = matches.length - wins;
+    // Get Open Table session games
+    const allSessionGames = await db.sessionGames.toArray();
+    const sessionGames = allSessionGames
+      .filter((g) => g.player_1_id === id || g.player_2_id === id)
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
 
-    // Calculate streaks
+    const matchWins = matches.filter((m) => m.winner_id === id).length;
+    const matchLosses = matches.length - matchWins;
+    const sessionWins = sessionGames.filter((g) => g.winner_id === id).length;
+    const sessionLosses = sessionGames.length - sessionWins;
+
+    const wins = matchWins + sessionWins;
+    const losses = matchLosses + sessionLosses;
+
+    // Combine all games chronologically for streak calculation
+    type GameResult = { won: boolean; date: string };
+    const allGames: GameResult[] = [
+      ...matches.map((m) => ({ won: m.winner_id === id, date: m.completed_at || m.started_at })),
+      ...sessionGames.map((g) => ({ won: g.winner_id === id, date: g.completed_at })),
+    ];
+    allGames.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // Calculate streaks from combined games
     let currentStreak = 0;
     let streakType = 'none';
     let longestStreak = 0;
     let tempStreak = 0;
 
-    for (const m of matches) {
+    for (const g of allGames) {
       if (currentStreak === 0) {
-        streakType = m.winner_id === id ? 'win' : 'loss';
+        streakType = g.won ? 'win' : 'loss';
       }
-      if ((m.winner_id === id && streakType === 'win') || (m.winner_id !== id && streakType === 'loss')) {
+      if ((g.won && streakType === 'win') || (!g.won && streakType === 'loss')) {
         currentStreak++;
       } else if (currentStreak > 0) {
         break;
@@ -68,8 +87,8 @@ export default function PlayerProfilePage() {
     }
 
     // Longest win streak
-    for (const m of [...matches].reverse()) {
-      if (m.winner_id === id) {
+    for (const g of [...allGames].reverse()) {
+      if (g.won) {
         tempStreak++;
         longestStreak = Math.max(longestStreak, tempStreak);
       } else {
@@ -79,12 +98,19 @@ export default function PlayerProfilePage() {
 
     setStats({ wins, losses, winPct: getWinPercentage(wins, losses), currentStreak, streakType, longestStreak });
 
-    // Head to head
+    // Head to head — combine 1v1 matches + session games
     const opponentMap = new Map<string, { wins: number; losses: number }>();
     for (const m of matches) {
       const oppId = m.player_1_id === id ? m.player_2_id : m.player_1_id;
       const existing = opponentMap.get(oppId) || { wins: 0, losses: 0 };
       if (m.winner_id === id) existing.wins++;
+      else existing.losses++;
+      opponentMap.set(oppId, existing);
+    }
+    for (const g of sessionGames) {
+      const oppId = g.player_1_id === id ? g.player_2_id : g.player_1_id;
+      const existing = opponentMap.get(oppId) || { wins: 0, losses: 0 };
+      if (g.winner_id === id) existing.wins++;
       else existing.losses++;
       opponentMap.set(oppId, existing);
     }
@@ -98,18 +124,55 @@ export default function PlayerProfilePage() {
     h2hRecords.sort((a, b) => (b.wins + b.losses) - (a.wins + a.losses));
     setH2h(h2hRecords);
 
-    // Match history
-    const historyItems = await Promise.all(
-      matches.slice(0, 20).map(async (m) => {
-        const oppId = m.player_1_id === id ? m.player_2_id : m.player_1_id;
-        const [opponent, gameType] = await Promise.all([
-          db.profiles.get(oppId),
-          db.gameTypes.get(m.game_type_id),
-        ]);
-        return { ...m, opponent, gameType };
-      })
-    );
-    setHistory(historyItems);
+    // Match history — combine 1v1 matches + session games
+    const allSessions = await db.sessions.toArray();
+    const sessionMap = new Map(allSessions.map(s => [s.id, s]));
+
+    type HistoryEntry = MatchHistoryItem;
+    const combinedHistory: HistoryEntry[] = [];
+
+    // Add 1v1 matches
+    for (const m of matches) {
+      const oppId = m.player_1_id === id ? m.player_2_id : m.player_1_id;
+      const [opponent, gameType] = await Promise.all([
+        db.profiles.get(oppId),
+        db.gameTypes.get(m.game_type_id),
+      ]);
+      combinedHistory.push({ ...m, opponent, gameType });
+    }
+
+    // Add session games as match-like history entries
+    for (const g of sessionGames) {
+      const oppId = g.player_1_id === id ? g.player_2_id : g.player_1_id;
+      const session = sessionMap.get(g.session_id);
+      const [opponent, gameType] = await Promise.all([
+        db.profiles.get(oppId),
+        session ? db.gameTypes.get(session.game_type_id) : Promise.resolve(undefined),
+      ]);
+      // Create a match-like object for display
+      combinedHistory.push({
+        id: g.id,
+        game_type_id: session?.game_type_id || '',
+        player_1_id: g.player_1_id,
+        player_2_id: g.player_2_id,
+        player_1_score: g.winner_id === g.player_1_id ? 1 : 0,
+        player_2_score: g.winner_id === g.player_2_id ? 1 : 0,
+        format: 'single' as const,
+        format_target: 1,
+        winner_id: g.winner_id,
+        status: 'completed' as const,
+        started_at: g.completed_at,
+        completed_at: g.completed_at,
+        venue_id: null,
+        synced: g.synced,
+        local_updated_at: g.completed_at,
+        opponent,
+        gameType,
+      });
+    }
+
+    combinedHistory.sort((a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime());
+    setHistory(combinedHistory.slice(0, 30));
     setIsLoading(false);
   }, [id]);
 
@@ -188,7 +251,7 @@ export default function PlayerProfilePage() {
           <Card>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Total Matches</span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">Total Games</span>
                 <span className="text-sm font-medium text-gray-900 dark:text-white">{stats.wins + stats.losses}</span>
               </div>
               <div className="flex justify-between items-center">
@@ -258,7 +321,7 @@ export default function PlayerProfilePage() {
         {tab === 'history' && (
           <div className="space-y-2">
             {history.length === 0 ? (
-              <Card><p className="text-sm text-center text-gray-500 py-4">No match history</p></Card>
+              <Card><p className="text-sm text-center text-gray-500 py-4">No game history</p></Card>
             ) : (
               history.map((m) => {
                 const won = m.winner_id === id;
