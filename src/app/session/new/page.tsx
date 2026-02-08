@@ -43,7 +43,7 @@ export default function NewSessionPage() {
       await seedSystemGameTypes();
       const types = await db.gameTypes.toArray();
       const allPlayers = await db.profiles.toArray();
-      const activePlayers = allPlayers.filter(p => !p.merged_into);
+      const activePlayers = allPlayers.filter(p => !p.merged_into && (!venueId || p.venue_id === venueId || !p.venue_id));
       activePlayers.sort((a, b) => a.display_name.localeCompare(b.display_name));
       setGameTypes(types);
       setPlayers(activePlayers);
@@ -363,7 +363,7 @@ export default function NewSessionPage() {
               {([
                 { mode: 'king_of_table' as RotationMode, label: 'King of the Table', desc: 'Winner stays, next up challenges', icon: Crown },
                 { mode: 'round_robin' as RotationMode, label: 'Round Robin', desc: 'Both rotate out, next two play', icon: RefreshCw },
-                { mode: 'winners_out' as RotationMode, label: "Winner\u2019s Out", desc: 'Winner leaves, loser stays on', icon: ArrowDownUp },
+                { mode: 'winners_out' as RotationMode, label: "Winner's Out", desc: 'Winner leaves, loser stays on', icon: ArrowDownUp },
                 { mode: 'straight_rotation' as RotationMode, label: 'Straight Rotation', desc: 'Both rotate out, fixed order', icon: RotateCcw },
               ]).map(({ mode, label, desc, icon: Icon }) => (
                 <button

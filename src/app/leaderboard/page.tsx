@@ -44,7 +44,7 @@ export default function LeaderboardPage() {
     const loadLeaderboard = async () => {
       setIsLoading(true);
       const allProfiles = await db.profiles.toArray();
-      const profiles = allProfiles.filter((p) => !p.merged_into && (!venueId || p.venue_id === venueId));
+      const profiles = allProfiles.filter((p) => !p.merged_into && (!venueId || p.venue_id === venueId || !p.venue_id));
 
       const cutoff = timePeriod !== 'all'
         ? new Date(Date.now() - parseInt(timePeriod) * 24 * 60 * 60 * 1000).toISOString()

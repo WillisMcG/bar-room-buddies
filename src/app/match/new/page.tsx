@@ -61,7 +61,7 @@ function NewMatchContent() {
       const types = await db.gameTypes.toArray();
       // Get all profiles and filter in JS — querying for null in IndexedDB is unreliable
       const allPlayers = await db.profiles.toArray();
-      const activePlayers = allPlayers.filter(p => !p.merged_into);
+      const activePlayers = allPlayers.filter(p => !p.merged_into && (!venueId || p.venue_id === venueId || !p.venue_id));
       activePlayers.sort((a, b) => a.display_name.localeCompare(b.display_name));
       setGameTypes(types);
       setPlayers(activePlayers);
