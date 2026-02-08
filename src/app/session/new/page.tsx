@@ -44,7 +44,11 @@ export default function NewSessionPage() {
       activePlayers.sort((a, b) => a.display_name.localeCompare(b.display_name));
       setGameTypes(types);
       setPlayers(activePlayers);
-      if (types.length > 0) setSelectedGameType(types[0].id);
+      if (types.length > 0) {
+        // Default to 8-Ball if available, otherwise first type
+        const eightBall = types.find(t => t.name === '8-Ball');
+        setSelectedGameType((eightBall || types[0]).id);
+      }
       setIsLoading(false);
     };
     loadData();
