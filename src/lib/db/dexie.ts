@@ -1,0 +1,164 @@
+import Dexie, { type EntityTable } from 'dexie';
+
+// ---------- Local Database Types ----------
+
+export interface LocalProfile {
+  id: string;
+  email: string | null;
+  display_name: string;
+  avatar_url: string | null;
+  avatar_blob: Blob | null;
+  is_local: boolean;
+  device_id: string | null;
+  merged_into: string | null;
+  created_at: string;
+  synced: boolean;
+}
+
+export interface LocalGameType {
+  id: string;
+  name: string;
+  is_system: boolean;
+  win_condition_type: 'race' | 'points' | 'timed';
+  created_by: string | null;
+  rules_notes: string | null;
+  default_format: 'single' | 'race_to' | 'best_of';
+  default_format_target: number | null;
+  synced: boolean;
+}
+
+export interface LocalMatch {
+  id: string;
+  game_type_id: string;
+  player_1_id: string;
+  player_2_id: string;
+  format: 'single' | 'race_to' | 'best_of';
+  format_target: number | null;
+  player_1_score: number;
+  player_2_score: number;
+  winner_id: string | null;
+  started_at: string;
+  completed_at: string | null;
+  status: 'in_progress' | 'completed' | 'abandoned';
+  venue_id: string | null;
+  synced: boolean;
+  local_updated_at: string;
+}
+
+export interface LocalGame {
+  id: string;
+  match_id: string;
+  game_number: number;
+  winner_id: string;
+  completed_at: string;
+  synced: boolean;
+}
+
+export interface LocalVenue {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  logo_blob: Blob | null;
+  accent_color: string;
+  owner_id: string;
+  created_at: string;
+  synced: boolean;
+}
+
+export interface SyncMeta {
+  key: string;
+  value: string;
+}
+
+// ---------- Database Class ----------
+
+class BarRoomBuddiesDB extends Dexie {
+  profiles!: EntityTable<LocalProfile, 'id'>;
+  gameTypes!: EntityTable<LocalGameType, 'id'>;
+  matches!: EntityTable<LocalMatch, 'id'>;
+  games!: EntityTable<LocalGame, 'id'>;
+  venues!: EntityTable<LocalVenue, 'id'>;
+  syncMeta!: EntityTable<SyncMeta, 'key'>;
+
+  constructor() {
+    super('BarRoomBuddiesDB');
+
+    this.version(1).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+    });
+  }
+}
+
+// Singleton instance
+export const db = new BarRoomBuddiesDB();
+
+// ---------- Helper Functions ----------
+
+export function getDeviceId(): string {
+  if (typeof window === 'undefined') return 'server';
+  let deviceId = window.localStorage.getItem('brb_device_id');
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    window.localStorage.setItem('brb_device_id', deviceId);
+  }
+  return deviceId;
+}
+
+export async function seedSystemGameTypes() {
+  const existing = await db.gameTypes.where('is_system').equals(1).count();
+  if (existing > 0) return;
+
+  const systemTypes: LocalGameType[] = [
+    {
+      id: crypto.randomUUID(),
+      name: '8-Ball',
+      is_system: true,
+      win_condition_type: 'race',
+      created_by: null,
+      rules_notes: 'Standard 8-ball rules. Pocket your group (solids or stripes) then the 8-ball.',
+      default_format: 'race_to',
+      default_format_target: 5,
+      synced: false,
+    },
+    {
+      id: crypto.randomUUID(),
+      name: '9-Ball',
+      is_system: true,
+      win_condition_type: 'race',
+      created_by: null,
+      rules_notes: 'Balls must be pocketed in numerical order (1-9). The player who legally pockets the 9-ball wins.',
+      default_format: 'race_to',
+      default_format_target: 7,
+      synced: false,
+    },
+    {
+      id: crypto.randomUUID(),
+      name: '10-Ball',
+      is_system: true,
+      win_condition_type: 'race',
+      created_by: null,
+      rules_notes: 'Call-shot version of 9-ball using balls 1-10. Must call every shot.',
+      default_format: 'race_to',
+      default_format_target: 7,
+      synced: false,
+    },
+    {
+      id: crypto.randomUUID(),
+      name: 'Straight Pool (14.1)',
+      is_system: true,
+      win_condition_type: 'points',
+      created_by: null,
+      rules_notes: 'Call-shot game. Each legally pocketed ball is 1 point. Play to an agreed-upon score.',
+      default_format: 'race_to',
+      default_format_target: 100,
+      synced: false,
+    },
+  ];
+
+  await db.gameTypes.bulkAdd(systemTypes);
+}
