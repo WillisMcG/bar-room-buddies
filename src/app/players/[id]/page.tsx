@@ -17,6 +17,14 @@ interface HeadToHeadRecord {
   losses: number;
 }
 
+interface GameTypeStatRecord {
+  gameType: LocalGameType;
+  wins: number;
+  losses: number;
+  winPct: number;
+  longestStreak: number;
+}
+
 interface MatchHistoryItem extends LocalMatch {
   opponent?: LocalProfile;
   gameType?: LocalGameType;
@@ -27,6 +35,7 @@ export default function PlayerProfilePage() {
   const router = useRouter();
   const [player, setPlayer] = useState<LocalProfile | null>(null);
   const [stats, setStats] = useState({ wins: 0, losses: 0, winPct: 0, currentStreak: 0, streakType: 'none' as string, longestStreak: 0 });
+  const [gameTypeStats, setGameTypeStats] = useState<GameTypeStatRecord[]>([]);
   const [h2h, setH2h] = useState<HeadToHeadRecord[]>([]);
   const [history, setHistory] = useState<MatchHistoryItem[]>([]);
   const [tab, setTab] = useState<'stats' | 'h2h' | 'history'>('stats');
@@ -98,6 +107,57 @@ export default function PlayerProfilePage() {
 
     setStats({ wins, losses, winPct: getWinPercentage(wins, losses), currentStreak, streakType, longestStreak });
 
+    // Per-game-type stats
+    const allGameTypes = await db.gameTypes.toArray();
+    const gameTypeMap = new Map(allGameTypes.map(gt => [gt.id, gt]));
+    const allSessions = await db.sessions.toArray();
+    const sessionMap = new Map(allSessions.map(s => [s.id, s]));
+
+    const perType = new Map<string, { wins: number; losses: number; games: GameResult[] }>();
+
+    for (const m of matches) {
+      const gtId = m.game_type_id;
+      const entry = perType.get(gtId) || { wins: 0, losses: 0, games: [] };
+      const won = m.winner_id === id;
+      if (won) entry.wins++; else entry.losses++;
+      entry.games.push({ won, date: m.completed_at || m.started_at });
+      perType.set(gtId, entry);
+    }
+
+    for (const g of sessionGames) {
+      const session = sessionMap.get(g.session_id);
+      const gtId = session?.game_type_id || 'unknown';
+      const entry = perType.get(gtId) || { wins: 0, losses: 0, games: [] };
+      const won = g.winner_id === id;
+      if (won) entry.wins++; else entry.losses++;
+      entry.games.push({ won, date: g.completed_at });
+      perType.set(gtId, entry);
+    }
+
+    const gtStats: GameTypeStatRecord[] = [];
+    const perTypeEntries = Array.from(perType.entries());
+    for (const [gtId, data] of perTypeEntries) {
+      const gt = gameTypeMap.get(gtId);
+      if (!gt) continue;
+      // Calculate longest win streak for this game type
+      data.games.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      let gtLongest = 0;
+      let gtTemp = 0;
+      for (const g of data.games) {
+        if (g.won) { gtTemp++; gtLongest = Math.max(gtLongest, gtTemp); }
+        else { gtTemp = 0; }
+      }
+      gtStats.push({
+        gameType: gt,
+        wins: data.wins,
+        losses: data.losses,
+        winPct: getWinPercentage(data.wins, data.losses),
+        longestStreak: gtLongest,
+      });
+    }
+    gtStats.sort((a, b) => (b.wins + b.losses) - (a.wins + a.losses));
+    setGameTypeStats(gtStats);
+
     // Head to head — combine 1v1 matches + session games
     const opponentMap = new Map<string, { wins: number; losses: number }>();
     for (const m of matches) {
@@ -125,9 +185,6 @@ export default function PlayerProfilePage() {
     setH2h(h2hRecords);
 
     // Match history — combine 1v1 matches + session games
-    const allSessions = await db.sessions.toArray();
-    const sessionMap = new Map(allSessions.map(s => [s.id, s]));
-
     type HistoryEntry = MatchHistoryItem;
     const combinedHistory: HistoryEntry[] = [];
 
@@ -248,48 +305,49 @@ export default function PlayerProfilePage() {
 
         {/* Stats Tab */}
         {tab === 'stats' && (
-          <Card>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Total Games</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">{stats.wins + stats.losses}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Win Rate</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">{stats.winPct}%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Current Streak</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">
-                  {getStreakText(stats.currentStreak, stats.streakType as any)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Longest Win Streak</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">{stats.longestStreak}</span>
-              </div>
-
-              {/* Win rate bar */}
-              {stats.wins + stats.losses > 0 && (
-                <div className="pt-2">
-                  <div className="flex gap-1 h-3 rounded-full overflow-hidden">
+          <div className="space-y-3">
+            {gameTypeStats.length === 0 ? (
+              <Card><p className="text-sm text-center text-gray-500 py-4">No games played yet</p></Card>
+            ) : (
+              gameTypeStats.map((gt) => (
+                <Card key={gt.gameType.id}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{gt.gameType.name}</h3>
+                    <span className="text-xs text-gray-500">{gt.wins + gt.losses} games</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-center mb-3">
+                    <div>
+                      <div className="text-base font-bold text-green-600">{gt.wins}</div>
+                      <div className="text-[10px] text-gray-500">Wins</div>
+                    </div>
+                    <div>
+                      <div className="text-base font-bold text-red-500">{gt.losses}</div>
+                      <div className="text-[10px] text-gray-500">Losses</div>
+                    </div>
+                    <div>
+                      <div className="text-base font-bold text-gray-900 dark:text-white">{gt.winPct}%</div>
+                      <div className="text-[10px] text-gray-500">Win %</div>
+                    </div>
+                    <div>
+                      <div className="text-base font-bold text-gray-900 dark:text-white">{gt.longestStreak}</div>
+                      <div className="text-[10px] text-gray-500">Best Run</div>
+                    </div>
+                  </div>
+                  {/* Win rate bar */}
+                  <div className="flex gap-1 h-2.5 rounded-full overflow-hidden">
                     <div
                       className="bg-green-500 rounded-l-full transition-all"
-                      style={{ width: `${stats.winPct}%` }}
+                      style={{ width: `${gt.winPct}%` }}
                     />
                     <div
                       className="bg-red-400 rounded-r-full transition-all"
-                      style={{ width: `${100 - stats.winPct}%` }}
+                      style={{ width: `${100 - gt.winPct}%` }}
                     />
                   </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-[10px] text-green-600">{stats.wins}W</span>
-                    <span className="text-[10px] text-red-500">{stats.losses}L</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
+                </Card>
+              ))
+            )}
+          </div>
         )}
 
         {/* Head to Head Tab */}
