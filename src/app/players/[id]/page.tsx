@@ -47,24 +47,37 @@ export default function PlayerProfilePage() {
     if (!p) return;
     setPlayer(p);
 
-    // Get completed 1v1 matches
+    // Get completed matches (includes doubles — check partner IDs too)
     const matches = await db.matches
       .where('status')
       .equals('completed')
-      .filter((m) => m.player_1_id === id || m.player_2_id === id)
+      .filter((m) =>
+        m.player_1_id === id || m.player_2_id === id ||
+        m.player_1_partner_id === id || m.player_2_partner_id === id
+      )
       .toArray();
 
     matches.sort((a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime());
 
-    // Get Open Table session games
+    // Helper: did this player win a given match/game?
+    const didWinMatch = (m: { player_1_id: string; player_1_partner_id?: string | null; winner_id: string | null }) => {
+      const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+      const team1Won = m.winner_id === m.player_1_id;
+      return onTeam1 ? team1Won : !team1Won;
+    };
+
+    // Get session games (includes doubles — check partner IDs too)
     const allSessionGames = await db.sessionGames.toArray();
     const sessionGames = allSessionGames
-      .filter((g) => g.player_1_id === id || g.player_2_id === id)
+      .filter((g) =>
+        g.player_1_id === id || g.player_2_id === id ||
+        g.player_1_partner_id === id || g.player_2_partner_id === id
+      )
       .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
 
-    const matchWins = matches.filter((m) => m.winner_id === id).length;
+    const matchWins = matches.filter((m) => didWinMatch(m)).length;
     const matchLosses = matches.length - matchWins;
-    const sessionWins = sessionGames.filter((g) => g.winner_id === id).length;
+    const sessionWins = sessionGames.filter((g) => didWinMatch(g)).length;
     const sessionLosses = sessionGames.length - sessionWins;
 
     const wins = matchWins + sessionWins;
@@ -73,8 +86,8 @@ export default function PlayerProfilePage() {
     // Combine all games chronologically for streak calculation
     type GameResult = { won: boolean; date: string };
     const allGames: GameResult[] = [
-      ...matches.map((m) => ({ won: m.winner_id === id, date: m.completed_at || m.started_at })),
-      ...sessionGames.map((g) => ({ won: g.winner_id === id, date: g.completed_at })),
+      ...matches.map((m) => ({ won: didWinMatch(m), date: m.completed_at || m.started_at })),
+      ...sessionGames.map((g) => ({ won: didWinMatch(g), date: g.completed_at })),
     ];
     allGames.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -118,7 +131,7 @@ export default function PlayerProfilePage() {
     for (const m of matches) {
       const gtId = m.game_type_id;
       const entry = perType.get(gtId) || { wins: 0, losses: 0, games: [] };
-      const won = m.winner_id === id;
+      const won = didWinMatch(m);
       if (won) entry.wins++; else entry.losses++;
       entry.games.push({ won, date: m.completed_at || m.started_at });
       perType.set(gtId, entry);
@@ -128,7 +141,7 @@ export default function PlayerProfilePage() {
       const session = sessionMap.get(g.session_id);
       const gtId = session?.game_type_id || 'unknown';
       const entry = perType.get(gtId) || { wins: 0, losses: 0, games: [] };
-      const won = g.winner_id === id;
+      const won = didWinMatch(g);
       if (won) entry.wins++; else entry.losses++;
       entry.games.push({ won, date: g.completed_at });
       perType.set(gtId, entry);
@@ -158,21 +171,30 @@ export default function PlayerProfilePage() {
     gtStats.sort((a, b) => (b.wins + b.losses) - (a.wins + a.losses));
     setGameTypeStats(gtStats);
 
-    // Head to head — combine 1v1 matches + session games
+    // Head to head — combine matches + session games (including doubles opponents)
     const opponentMap = new Map<string, { wins: number; losses: number }>();
-    for (const m of matches) {
-      const oppId = m.player_1_id === id ? m.player_2_id : m.player_1_id;
+    const addH2H = (oppId: string, won: boolean) => {
+      if (!oppId || oppId === id) return;
       const existing = opponentMap.get(oppId) || { wins: 0, losses: 0 };
-      if (m.winner_id === id) existing.wins++;
-      else existing.losses++;
+      if (won) existing.wins++; else existing.losses++;
       opponentMap.set(oppId, existing);
+    };
+    for (const m of matches) {
+      const won = didWinMatch(m);
+      const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+      // Opponents are on the other team
+      addH2H(onTeam1 ? m.player_2_id : m.player_1_id, won);
+      if (m.player_1_partner_id || m.player_2_partner_id) {
+        addH2H(onTeam1 ? (m.player_2_partner_id || '') : (m.player_1_partner_id || ''), won);
+      }
     }
     for (const g of sessionGames) {
-      const oppId = g.player_1_id === id ? g.player_2_id : g.player_1_id;
-      const existing = opponentMap.get(oppId) || { wins: 0, losses: 0 };
-      if (g.winner_id === id) existing.wins++;
-      else existing.losses++;
-      opponentMap.set(oppId, existing);
+      const won = didWinMatch(g);
+      const onTeam1 = g.player_1_id === id || g.player_1_partner_id === id;
+      addH2H(onTeam1 ? g.player_2_id : g.player_1_id, won);
+      if (g.player_1_partner_id || g.player_2_partner_id) {
+        addH2H(onTeam1 ? (g.player_2_partner_id || '') : (g.player_1_partner_id || ''), won);
+      }
     }
 
     const h2hRecords: HeadToHeadRecord[] = [];
@@ -188,9 +210,10 @@ export default function PlayerProfilePage() {
     type HistoryEntry = MatchHistoryItem;
     const combinedHistory: HistoryEntry[] = [];
 
-    // Add 1v1 matches
+    // Add matches (for doubles, find the primary opponent on the other team)
     for (const m of matches) {
-      const oppId = m.player_1_id === id ? m.player_2_id : m.player_1_id;
+      const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+      const oppId = onTeam1 ? m.player_2_id : m.player_1_id;
       const [opponent, gameType] = await Promise.all([
         db.profiles.get(oppId),
         db.gameTypes.get(m.game_type_id),
@@ -200,7 +223,8 @@ export default function PlayerProfilePage() {
 
     // Add session games as match-like history entries
     for (const g of sessionGames) {
-      const oppId = g.player_1_id === id ? g.player_2_id : g.player_1_id;
+      const onTeam1 = g.player_1_id === id || g.player_1_partner_id === id;
+      const oppId = onTeam1 ? g.player_2_id : g.player_1_id;
       const session = sessionMap.get(g.session_id);
       const [opponent, gameType] = await Promise.all([
         db.profiles.get(oppId),
@@ -210,8 +234,11 @@ export default function PlayerProfilePage() {
       combinedHistory.push({
         id: g.id,
         game_type_id: session?.game_type_id || '',
+        match_mode: (session as any)?.session_mode || 'singles',
         player_1_id: g.player_1_id,
         player_2_id: g.player_2_id,
+        player_1_partner_id: g.player_1_partner_id || null,
+        player_2_partner_id: g.player_2_partner_id || null,
         player_1_score: g.winner_id === g.player_1_id ? 1 : 0,
         player_2_score: g.winner_id === g.player_2_id ? 1 : 0,
         format: 'single' as const,
@@ -382,8 +409,10 @@ export default function PlayerProfilePage() {
               <Card><p className="text-sm text-center text-gray-500 py-4">No game history</p></Card>
             ) : (
               history.map((m) => {
-                const won = m.winner_id === id;
-                const score = m.player_1_id === id
+                const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+                const team1Won = m.winner_id === m.player_1_id;
+                const won = onTeam1 ? team1Won : !team1Won;
+                const score = onTeam1
                   ? `${m.player_1_score} - ${m.player_2_score}`
                   : `${m.player_2_score} - ${m.player_1_score}`;
                 return (
