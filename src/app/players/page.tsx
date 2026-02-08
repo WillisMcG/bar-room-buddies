@@ -83,7 +83,7 @@ export default function PlayersPage() {
       })
     );
 
-    withStats.sort((a, b) => b.winPct - a.winPct || (b.wins + b.losses) - (a.wins + a.losses));
+    withStats.sort((a, b) => a.display_name.localeCompare(b.display_name));
     setPlayers(withStats);
     setIsLoading(false);
   };
