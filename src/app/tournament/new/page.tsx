@@ -48,35 +48,112 @@ export default function NewTournamentPage() {
   const [showNewPlayer, setShowNewPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
 
+  // Step 2b: Team pairing (doubles)
+  const [pairedTeams, setPairedTeams] = useState<Array<[string, string]>>([]);
+  const [teamPairingSelection, setTeamPairingSelection] = useState<string[]>([]);
+
   // Step 3: Seeding
   const [seedingMethod, setSeedingMethod] = useState<'random' | 'manual'>('random');
-  const [seedOrder, setSeedOrder] = useState<string[]>([]);
+  const [seededOrder, setSeededOrder] = useState<SeedEntry[]>([]);
+  const [swapSelection, setSwapSelection] = useState<number | null>(null);
 
-  // Load initial data
+  // Load data
   useEffect(() => {
-    async function load() {
+    const loadData = async () => {
+      const { seedSystemGameTypes } = await import('@/lib/db/dexie');
+      await seedSystemGameTypes();
       const types = await db.gameTypes.toArray();
+      const allPlayers = await db.profiles.toArray();
+      const activePlayers = allPlayers.filter(p => !p.merged_into);
+      activePlayers.sort((a, b) => a.display_name.localeCompare(b.display_name));
       setGameTypes(types);
-      if (types.length > 0) setSelectedGameType(types[0].id);
-
-      const profiles = await db.profiles.toArray();
-      setPlayers(profiles);
+      setPlayers(activePlayers);
+      if (types.length > 0) {
+        setSelectedGameType(types[0].id);
+        if (types[0].default_format) setMatchFormat(types[0].default_format);
+        if (types[0].default_format_target) setMatchFormatTarget(types[0].default_format_target);
+      }
       setIsLoading(false);
-    }
-    load();
+    };
+    loadData();
   }, []);
 
-  // Update seed order when selected players change
-  useEffect(() => {
-    setSeedOrder(Array.from(selectedPlayerIds));
-  }, [selectedPlayerIds]);
+  const isDoubles = matchMode === 'doubles' || matchMode === 'scotch_doubles';
+  const selectedPlayers = players.filter(p => selectedPlayerIds.has(p.id));
+  const participantCount = isDoubles ? pairedTeams.length : selectedPlayerIds.size;
 
+  // Step indicators
+  const steps = isDoubles
+    ? ['Setup', 'Players', 'Teams', 'Seeding', 'Preview']
+    : ['Setup', 'Players', 'Seeding', 'Preview'];
+  const totalSteps = steps.length;
+
+  // Determine actual step numbers for doubles vs singles
+  const teamStep = isDoubles ? 3 : -1;
+  const seedStep = isDoubles ? 4 : 3;
+  const previewStep = isDoubles ? 5 : 4;
+
+  // Participant validation
+  const minPlayers = isDoubles ? 4 : 3;
+  const hasEnoughPlayers = isDoubles
+    ? selectedPlayerIds.size >= 4 && selectedPlayerIds.size % 2 === 0
+    : selectedPlayerIds.size >= minPlayers;
+  const hasEnoughTeams = isDoubles ? pairedTeams.length >= 2 : true;
+
+  // Profile lookup helper
+  const profileMap = useMemo(() => {
+    const map = new Map<string, LocalProfile>();
+    players.forEach(p => map.set(p.id, p));
+    return map;
+  }, [players]);
+
+  // Generate seeds when entering seed step
+  const generateSeeds = () => {
+    if (isDoubles) {
+      const ids = pairedTeams.map(t => t[0]);
+      const partnerIds = pairedTeams.map(t => t[1]);
+      setSeededOrder(assignSeeds(ids, partnerIds, seedingMethod));
+    } else {
+      const ids = Array.from(selectedPlayerIds);
+      const partnerIds = ids.map(() => null);
+      setSeededOrder(assignSeeds(ids, partnerIds, seedingMethod));
+    }
+  };
+
+  // Handle game type change
+  const handleGameTypeChange = (id: string) => {
+    setSelectedGameType(id);
+    const gt = gameTypes.find(g => g.id === id);
+    if (gt) {
+      setMatchFormat(gt.default_format);
+      if (gt.default_format_target) setMatchFormatTarget(gt.default_format_target);
+    }
+  };
+
+  // Player selection
+  const togglePlayer = (id: string) => {
+    setSelectedPlayerIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        // Remove from teams if in doubles
+        if (isDoubles) {
+          setPairedTeams(pt => pt.filter(t => t[0] !== id && t[1] !== id));
+        }
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Add new player
   const handleAddPlayer = async () => {
     if (!newPlayerName.trim()) return;
-    const profile: typeof players[0] = {
+    const newPlayer: LocalProfile = {
       id: crypto.randomUUID(),
       email: null,
-      display_name: newPlayerName,
+      display_name: newPlayerName.trim(),
       avatar_url: null,
       avatar_blob: null,
       is_local: true,
@@ -85,48 +162,84 @@ export default function NewTournamentPage() {
       created_at: new Date().toISOString(),
       synced: false,
     };
-    await db.profiles.add(profile);
-    setPlayers([...players, profile]);
-    setSelectedPlayerIds(new Set([...selectedPlayerIds, profile.id]));
+    await db.profiles.add(newPlayer);
+    setPlayers(prev => [...prev, newPlayer].sort((a, b) => a.display_name.localeCompare(b.display_name)));
+    setSelectedPlayerIds(prev => new Set(Array.from(prev).concat(newPlayer.id)));
     setNewPlayerName('');
     setShowNewPlayer(false);
   };
 
+  // Doubles team pairing
+  const handleTeamPairingTap = (playerId: string) => {
+    if (teamPairingSelection.length === 0) {
+      setTeamPairingSelection([playerId]);
+    } else if (teamPairingSelection.length === 1) {
+      if (teamPairingSelection[0] === playerId) {
+        setTeamPairingSelection([]);
+      } else {
+        setPairedTeams(prev => [...prev, [teamPairingSelection[0], playerId]]);
+        setTeamPairingSelection([]);
+      }
+    }
+  };
+
+  const handleRandomizeAllTeams = () => {
+    const ids = Array.from(selectedPlayerIds);
+    if (ids.length < 4 || ids.length % 2 !== 0) return;
+    const teams = shuffleTeams(ids);
+    setPairedTeams(teams);
+    setTeamPairingSelection([]);
+  };
+
+  const removeTeam = (index: number) => {
+    setPairedTeams(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Seeding: swap two positions
+  const handleSeedTap = (index: number) => {
+    if (swapSelection === null) {
+      setSwapSelection(index);
+    } else {
+      if (swapSelection !== index) {
+        setSeededOrder(prev => {
+          const next = [...prev];
+          const temp = { ...next[swapSelection] };
+          next[swapSelection] = { ...next[index], seed: temp.seed };
+          next[index] = { ...temp, seed: next[index].seed };
+          // Fix seed numbers
+          return next.map((s, i) => ({ ...s, seed: i + 1 }));
+        });
+      }
+      setSwapSelection(null);
+    }
+  };
+
+  const handleReshuffle = () => {
+    if (isDoubles) {
+      const ids = pairedTeams.map(t => t[0]);
+      const partnerIds = pairedTeams.map(t => t[1]);
+      setSeededOrder(assignSeeds(ids, partnerIds, 'random'));
+    } else {
+      const ids = Array.from(selectedPlayerIds);
+      setSeededOrder(assignSeeds(ids, ids.map(() => null), 'random'));
+    }
+  };
+
+  // Create tournament
   const handleCreate = async () => {
-    if (!selectedGameType || selectedPlayerIds.size < 2) return;
+    if (isCreating || seededOrder.length < 2) return;
     setIsCreating(true);
 
     try {
-      const gameType = gameTypes.find(gt => gt.id === selectedGameType);
-      if (!gameType) return;
-
       const tournamentId = crypto.randomUUID();
       const now = new Date().toISOString();
-      const participantIds = Array.from(selectedPlayerIds);
-      const partnersIds = participantIds.map(() => null);
+      const gameType = gameTypes.find(g => g.id === selectedGameType);
+      const name = tournamentName.trim() || `${gameType?.name || 'Pool'} Tournament`;
 
-      // Create seeds
-      const seeds = assignSeeds(participantIds, partnersIds, seedingMethod);
-      const seedOrder_ = seedingMethod === 'manual' ? seedOrder : undefined;
-
-      // Generate bracket
-      const bracketShells = tournamentFormat === 'single_elimination'
-        ? generateSingleElimBracket(participantIds.length)
-        : generateDoubleElimBracket(participantIds.length);
-
-      // Adjust seeds for manual seeding
-      let finalSeeds = seeds;
-      if (seedingMethod === 'manual' && seedOrder_ && seedOrder_.length > 0) {
-        finalSeeds = assignSeeds(seedOrder_, partnersIds, 'manual');
-      }
-
-      // Create matches
-      const matches = buildTournamentMatches(tournamentId, bracketShells, finalSeeds);
-
-      // Insert into database
+      // Create tournament record
       await db.tournaments.add({
         id: tournamentId,
-        name: tournamentName || `Tournament ${new Date().toLocaleDateString()}`,
+        name,
         game_type_id: selectedGameType,
         format: tournamentFormat,
         match_mode: matchMode,
@@ -134,7 +247,7 @@ export default function NewTournamentPage() {
         match_format_target: matchFormat === 'single' ? null : matchFormatTarget,
         status: 'in_progress',
         seeding_method: seedingMethod,
-        total_participants: participantIds.length,
+        total_participants: seededOrder.length,
         started_at: now,
         completed_at: null,
         winner_id: null,
@@ -143,45 +256,74 @@ export default function NewTournamentPage() {
         local_updated_at: now,
       });
 
-      await db.tournamentParticipants.bulkAdd(
-        participantIds.map((playerId, idx) => ({
-          id: crypto.randomUUID(),
-          tournament_id: tournamentId,
-          player_id: playerId,
-          partner_id: null,
-          seed_position: idx + 1,
-          status: 'active' as const,
-          eliminated_round: null,
-          synced: false,
-        }))
-      );
+      // Create participant records
+      const participants = seededOrder.map(s => ({
+        id: crypto.randomUUID(),
+        tournament_id: tournamentId,
+        player_id: s.id,
+        partner_id: s.partnerId,
+        seed_position: s.seed,
+        status: 'active' as const,
+        eliminated_round: null,
+        synced: false,
+      }));
+      await db.tournamentParticipants.bulkAdd(participants);
 
-      await db.tournamentMatches.bulkAdd(
-        matches.map(m => ({
-          ...m,
-          synced: false,
-          local_updated_at: now,
-        }))
-      );
+      // Generate bracket
+      const shells = tournamentFormat === 'single_elimination'
+        ? generateSingleElimBracket(seededOrder.length)
+        : generateDoubleElimBracket(seededOrder.length);
+
+      const matchRecords = buildTournamentMatches(tournamentId, shells, seededOrder);
+
+      // Add synced + local_updated_at to each
+      const fullRecords = matchRecords.map(m => ({
+        ...m,
+        synced: false,
+        local_updated_at: now,
+      }));
+
+      await db.tournamentMatches.bulkAdd(fullRecords);
+
+      // Auto-advance byes: find completed bye matches and advance winners
+      const byeMatches = fullRecords.filter(m => m.is_bye && m.winner_id);
+      for (const bm of byeMatches) {
+        if (bm.next_winner_match_id) {
+          const nextMatch = fullRecords.find(m => m.id === bm.next_winner_match_id);
+          if (nextMatch) {
+            const update: Record<string, unknown> = { local_updated_at: now };
+            if (bm.next_winner_slot === 'player_1') {
+              update.player_1_id = bm.winner_id;
+              update.player_1_partner_id = bm.player_1_partner_id || bm.player_2_partner_id;
+              update.player_1_seed = bm.player_1_seed || bm.player_2_seed;
+            } else {
+              update.player_2_id = bm.winner_id;
+              update.player_2_partner_id = bm.player_1_partner_id || bm.player_2_partner_id;
+              update.player_2_seed = bm.player_1_seed || bm.player_2_seed;
+            }
+
+            await db.tournamentMatches.update(nextMatch.id, update);
+
+            // Check if next match now ready
+            const updatedNext = await db.tournamentMatches.get(nextMatch.id);
+            if (updatedNext && updatedNext.player_1_id && updatedNext.player_2_id && updatedNext.status === 'pending') {
+              await db.tournamentMatches.update(nextMatch.id, { status: 'ready' });
+            }
+          }
+        }
+      }
 
       router.push(`/tournament/${tournamentId}`);
-    } catch (error) {
-      console.error('Error creating tournament:', error);
-    } finally {
+    } catch (err) {
+      console.error('Failed to create tournament:', err);
       setIsCreating(false);
     }
   };
 
-  const handleMoveSeed = (fromIdx: number, direction: 'up' | 'down') => {
-    const newOrder = [...seedOrder];
-    const toIdx = direction === 'up' ? fromIdx - 1 : fromIdx + 1;
-    [newOrder[fromIdx], newOrder[toIdx]] = [newOrder[toIdx], newOrder[fromIdx]];
-    setSeedOrder(newOrder);
-  };
-
-  const handleShuffleSeeds = () => {
-    setSeedOrder(shuffleTeams(seedOrder));
-  };
+  // Bracket size preview
+  const bracketSize = nextPowerOf2(participantCount);
+  const byeCount = bracketSize - participantCount;
+  const totalRounds = participantCount > 1 ? Math.ceil(Math.log2(participantCount)) : 0;
 
   if (isLoading) {
     return (
@@ -191,309 +333,540 @@ export default function NewTournamentPage() {
     );
   }
 
-  // ===== STEP 1: FORMAT & GAME =====
-  if (step === 1) {
-    const gameType = gameTypes.find(gt => gt.id === selectedGameType);
-    const isValid = selectedGameType && tournamentName;
+  return (
+    <PageWrapper
+      title="New Tournament"
+      subtitle={steps[step - 1]}
+      action={
+        <button onClick={() => step > 1 ? setStep(step - 1) : router.back()} className="p-2 -mr-2">
+          <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+        </button>
+      }
+    >
+      {/* Step indicator */}
+      <div className="flex items-center gap-1 mb-6 mt-2">
+        {steps.map((s, i) => (
+          <div key={s} className="flex-1 flex items-center gap-1">
+            <div className={`h-1.5 flex-1 rounded-full transition-colors ${i + 1 <= step ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
+          </div>
+        ))}
+      </div>
 
-    return (
-      <PageWrapper title="New Tournament" action={<button onClick={() => router.push('/play')} className="p-2 -ml-2"><ArrowLeft className="w-5 h-5" /></button>}>
-        <div className="space-y-4 mt-4">
-          {/* Format */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Tournament Format</label>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {(['single_elimination', 'double_elimination'] as const).map(fmt => (
+      {/* ========== STEP 1: Format & Game ========== */}
+      {step === 1 && (
+        <div className="space-y-5">
+          {/* Tournament Name */}
+          <Card padding="md">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Tournament Name (optional)
+            </label>
+            <Input
+              value={tournamentName}
+              onChange={e => setTournamentName(e.target.value)}
+              placeholder="e.g. Friday Night 8-Ball"
+            />
+          </Card>
+
+          {/* Tournament Format */}
+          <Card padding="md">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Elimination Format
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'single_elimination', label: 'Single Elim', desc: 'One loss and you\'re out' },
+                { value: 'double_elimination', label: 'Double Elim', desc: 'Lose twice to be eliminated' },
+              ].map(opt => (
                 <button
-                  key={fmt}
-                  onClick={() => setTournamentFormat(fmt)}
-                  className={`p-3 rounded-lg text-sm font-medium transition-colors ${
-                    tournamentFormat === fmt
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
+                  key={opt.value}
+                  onClick={() => setTournamentFormat(opt.value as TournamentFormat)}
+                  className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                    tournamentFormat === opt.value
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 dark:border-gray-700'
                   }`}
                 >
-                  {fmt === 'single_elimination' ? 'Single Elim' : 'Double Elim'}
+                  <p className="font-medium text-sm text-gray-900 dark:text-white">{opt.label}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{opt.desc}</p>
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
 
           {/* Match Mode */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Match Mode</label>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {(['singles', 'doubles'] as const).map(mode => (
+          <Card padding="md">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Match Mode
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['singles', 'doubles', 'scotch_doubles'] as MatchMode[]).map(mode => (
                 <button
                   key={mode}
-                  onClick={() => setMatchMode(mode)}
-                  className={`p-3 rounded-lg text-sm font-medium transition-colors ${
+                  onClick={() => {
+                    setMatchMode(mode);
+                    setPairedTeams([]);
+                    setTeamPairingSelection([]);
+                  }}
+                  className={`p-2 rounded-lg border-2 text-center transition-colors ${
                     matchMode === mode
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 dark:border-gray-700'
                   }`}
                 >
-                  {mode === 'singles' ? '1v1' : 'Doubles'}
+                  <p className="font-medium text-xs text-gray-900 dark:text-white">
+                    {mode === 'singles' ? 'Singles' : mode === 'doubles' ? 'Doubles' : 'Scotch'}
+                  </p>
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
 
           {/* Game Type */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Game Type</label>
-            <div className="mt-2 space-y-2">
+          <Card padding="md">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Game Type
+            </label>
+            <div className="grid grid-cols-2 gap-2">
               {gameTypes.map(gt => (
                 <button
                   key={gt.id}
-                  onClick={() => setSelectedGameType(gt.id)}
-                  className={`w-full p-3 rounded-lg text-left text-sm transition-colors ${
+                  onClick={() => handleGameTypeChange(gt.id)}
+                  className={`p-3 rounded-lg border-2 text-left transition-colors ${
                     selectedGameType === gt.id
-                      ? 'bg-green-100 dark:bg-green-900/30 border border-green-500'
-                      : 'bg-gray-100 dark:bg-gray-800'
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 dark:border-gray-700'
                   }`}
                 >
-                  <p className="font-medium text-gray-900 dark:text-white">{gt.name}</p>
-                  {gt.rules_notes && <p className="text-xs text-gray-500 mt-1">{gt.rules_notes}</p>}
+                  <p className="font-medium text-sm text-gray-900 dark:text-white">{gt.name}</p>
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
 
           {/* Match Format */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Match Format</label>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {(['single', 'race_to', 'best_of'] as const).map(fmt => (
+          <Card padding="md">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Each Match Format
+            </label>
+            <div className="flex gap-2 mb-3">
+              {['single', 'race_to', 'best_of'].map(f => (
                 <button
-                  key={fmt}
-                  onClick={() => setMatchFormat(fmt)}
-                  className={`p-2 rounded-lg text-xs font-medium transition-colors ${
-                    matchFormat === fmt
+                  key={f}
+                  onClick={() => setMatchFormat(f)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                    matchFormat === f
                       ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                   }`}
                 >
-                  {fmt === 'single' ? 'Single' : fmt === 'race_to' ? 'Race To' : 'Best Of'}
+                  {f === 'single' ? 'Single' : f === 'race_to' ? 'Race To' : 'Best Of'}
                 </button>
               ))}
             </div>
             {matchFormat !== 'single' && (
-              <Input
-                type="number"
-                min="1"
-                max="20"
-                value={matchFormatTarget.toString()}
-                onChange={e => setMatchFormatTarget(Math.max(1, parseInt(e.target.value) || 1))}
-                className="mt-2"
-                placeholder="Target"
-              />
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  onClick={() => setMatchFormatTarget(Math.max(2, matchFormatTarget - 1))}
+                  className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg font-bold"
+                >
+                  −
+                </button>
+                <span className="text-2xl font-bold text-gray-900 dark:text-white w-12 text-center">
+                  {matchFormatTarget}
+                </span>
+                <button
+                  onClick={() => setMatchFormatTarget(matchFormatTarget + 1)}
+                  className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg font-bold"
+                >
+                  +
+                </button>
+              </div>
             )}
-          </div>
+          </Card>
 
-          {/* Tournament Name */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Tournament Name (optional)</label>
-            <Input
-              value={tournamentName}
-              onChange={e => setTournamentName(e.target.value)}
-              placeholder="e.g., Friday Night 8-Ball"
-              className="mt-2"
-            />
-          </div>
-
-          <Button onClick={() => setStep(2)} disabled={!isValid} className="w-full">
-            Continue
+          <Button
+            onClick={() => setStep(2)}
+            disabled={!selectedGameType}
+            className="w-full"
+          >
+            Next: Select Players
           </Button>
         </div>
-      </PageWrapper>
-    );
-  }
+      )}
 
-  // ===== STEP 2: SELECT PLAYERS =====
-  if (step === 2) {
-    const isValid = selectedPlayerIds.size >= 2;
-
-    return (
-      <PageWrapper
-        title="Select Players"
-        subtitle={`${selectedPlayerIds.size} selected`}
-        action={
-          <button onClick={() => setStep(1)} className="p-2 -ml-2">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-        }
-      >
-        <div className="space-y-3 mt-4">
-          {players.map(p => {
-            const isSelected = selectedPlayerIds.has(p.id);
-            return (
+      {/* ========== STEP 2: Select Players ========== */}
+      {step === 2 && (
+        <div className="space-y-4">
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Select Players ({selectedPlayerIds.size} selected)
+              </h3>
               <button
-                key={p.id}
-                onClick={() => {
-                  const newSet = new Set(selectedPlayerIds);
-                  if (isSelected) newSet.delete(p.id);
-                  else newSet.add(p.id);
-                  setSelectedPlayerIds(newSet);
-                }}
-                className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
-                  isSelected
-                    ? 'bg-green-100 dark:bg-green-900/30 border border-green-500'
-                    : 'bg-gray-100 dark:bg-gray-800'
-                }`}
+                onClick={() => setShowNewPlayer(true)}
+                className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400"
               >
-                <Avatar name={p.display_name} size="sm" />
-                <span className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-left">{p.display_name}</span>
-                {isSelected && <Check className="w-5 h-5 text-green-600" />}
+                <Plus className="w-4 h-4" /> Add New
               </button>
-            );
-          })}
-
-          <Button variant="secondary" onClick={() => setShowNewPlayer(true)} className="w-full">
-            <Plus className="w-4 h-4 mr-2" /> Add Player
-          </Button>
-        </div>
-
-        <div className="flex gap-2 mt-6">
-          <Button variant="secondary" onClick={() => setStep(1)} className="flex-1">
-            Back
-          </Button>
-          <Button onClick={() => setStep(3)} disabled={!isValid} className="flex-1">
-            Next
-          </Button>
-        </div>
-
-        {showNewPlayer && (
-          <Modal open onClose={() => setShowNewPlayer(false)}>
-            <div className="space-y-3">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Add Player</h2>
-              <Input
-                autoFocus
-                value={newPlayerName}
-                onChange={e => setNewPlayerName(e.target.value)}
-                placeholder="Player name"
-                onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
-              />
-              <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => setShowNewPlayer(false)} className="flex-1">
-                  Cancel
-                </Button>
-                <Button onClick={handleAddPlayer} disabled={!newPlayerName.trim()} className="flex-1">
-                  Add
-                </Button>
-              </div>
             </div>
-          </Modal>
-        )}
-      </PageWrapper>
-    );
-  }
 
-  // ===== STEP 3: SEEDING =====
-  if (step === 3) {
-    const selectedPlayers = Array.from(selectedPlayerIds)
-      .map(id => players.find(p => p.id === id)!)
-      .filter(Boolean);
+            {!hasEnoughPlayers && selectedPlayerIds.size > 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                {isDoubles
+                  ? 'Need at least 4 players (even number) for doubles tournament'
+                  : 'Need at least 3 players for a tournament'}
+              </p>
+            )}
 
-    return (
-      <PageWrapper
-        title="Seeding"
-        subtitle={`${selectedPlayers.length} players`}
-        action={
-          <button onClick={() => setStep(2)} className="p-2 -ml-2">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-        }
-      >
-        <div className="space-y-4 mt-4">
-          {/* Method */}
-          <div>
-            <label className="text-sm font-medium text-gray-900 dark:text-white">Seeding Method</label>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {(['random', 'manual'] as const).map(method => (
-                <button
-                  key={method}
-                  onClick={() => setSeedingMethod(method)}
-                  className={`p-3 rounded-lg text-sm font-medium transition-colors ${
-                    seedingMethod === method
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
-                  }`}
-                >
-                  {method === 'random' ? 'Random' : 'Manual'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {seedingMethod === 'manual' && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-900 dark:text-white">Seed Order</label>
-                <button
-                  onClick={handleShuffleSeeds}
-                  className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-                >
-                  <Shuffle className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                </button>
-              </div>
-              <div className="space-y-2">
-                {seedOrder.map((playerId, idx) => {
-                  const player = players.find(p => p.id === playerId);
-                  if (!player) return null;
-                  return (
-                    <div key={playerId} className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                      <span className="text-xs font-bold text-gray-500 w-6">#{idx + 1}</span>
-                      <Avatar name={player.display_name} size="xs" />
-                      <span className="text-sm text-gray-900 dark:text-white flex-1">{player.display_name}</span>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => handleMoveSeed(idx, 'up')}
-                          disabled={idx === 0}
-                          className="p-1 disabled:opacity-30"
-                        >
-                          <ArrowUpDown className="w-4 h-4 text-gray-600 dark:text-gray-400 transform -rotate-90" />
-                        </button>
-                        <button
-                          onClick={() => handleMoveSeed(idx, 'down')}
-                          disabled={idx === seedOrder.length - 1}
-                          className="p-1 disabled:opacity-30"
-                        >
-                          <ArrowUpDown className="w-4 h-4 text-gray-600 dark:text-gray-400 transform rotate-90" />
-                        </button>
+            <div className="grid grid-cols-3 gap-2">
+              {players.map(player => {
+                const isSelected = selectedPlayerIds.has(player.id);
+                return (
+                  <button
+                    key={player.id}
+                    onClick={() => togglePlayer(player.id)}
+                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-colors ${
+                      isSelected
+                        ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                        : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-white" />
                       </div>
+                    )}
+                    <Avatar name={player.display_name} size="sm" />
+                    <span className="text-xs mt-1 text-gray-900 dark:text-white truncate w-full text-center">
+                      {player.display_name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Button
+            onClick={() => {
+              if (isDoubles) {
+                setStep(3);
+              } else {
+                generateSeeds();
+                setStep(3);
+              }
+            }}
+            disabled={!hasEnoughPlayers}
+            className="w-full"
+          >
+            {isDoubles ? 'Next: Pair Teams' : 'Next: Seeding'}
+          </Button>
+        </div>
+      )}
+
+      {/* ========== STEP 3 (doubles only): Team Pairing ========== */}
+      {step === teamStep && isDoubles && (
+        <div className="space-y-4">
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Pair Teams ({pairedTeams.length} teams)
+              </h3>
+              <button
+                onClick={handleRandomizeAllTeams}
+                className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400"
+              >
+                <Shuffle className="w-4 h-4" /> Randomize
+              </button>
+            </div>
+
+            {/* Paired teams */}
+            {pairedTeams.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {pairedTeams.map((team, i) => {
+                  const p1 = profileMap.get(team[0]);
+                  const p2 = profileMap.get(team[1]);
+                  return (
+                    <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800">
+                      <span className="text-xs font-bold text-gray-400 w-6">#{i + 1}</span>
+                      <Avatar name={p1?.display_name || '?'} size="xs" />
+                      <span className="text-sm text-gray-900 dark:text-white truncate">{p1?.display_name}</span>
+                      <span className="text-xs text-gray-400">&</span>
+                      <Avatar name={p2?.display_name || '?'} size="xs" />
+                      <span className="text-sm text-gray-900 dark:text-white truncate">{p2?.display_name}</span>
+                      <button onClick={() => removeTeam(i)} className="ml-auto text-red-500 text-xs">✕</button>
                     </div>
                   );
                 })}
               </div>
+            )}
+
+            {/* Unpaired players */}
+            {(() => {
+              const paired = new Set<string>();
+              pairedTeams.forEach(t => { paired.add(t[0]); paired.add(t[1]); });
+              const unpaired = Array.from(selectedPlayerIds).filter(id => !paired.has(id));
+              if (unpaired.length === 0) return null;
+              return (
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Tap two players to pair them ({unpaired.length} remaining)
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {unpaired.map(id => {
+                      const player = profileMap.get(id);
+                      const isSelected = teamPairingSelection.includes(id);
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => handleTeamPairingTap(id)}
+                          className={`flex flex-col items-center p-2 rounded-lg border-2 transition-colors ${
+                            isSelected
+                              ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}
+                        >
+                          <Avatar name={player?.display_name || '?'} size="sm" />
+                          <span className="text-xs mt-1 truncate w-full text-center text-gray-900 dark:text-white">
+                            {player?.display_name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </Card>
+
+          <Button
+            onClick={() => {
+              generateSeeds();
+              setStep(seedStep);
+            }}
+            disabled={!hasEnoughTeams}
+            className="w-full"
+          >
+            Next: Seeding
+          </Button>
+        </div>
+      )}
+
+      {/* ========== SEEDING STEP ========== */}
+      {step === seedStep && (
+        <div className="space-y-4">
+          <Card padding="md">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Bracket Seeding
+              </h3>
+              <div className="flex gap-2">
+                {seedingMethod === 'random' && (
+                  <button
+                    onClick={handleReshuffle}
+                    className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400"
+                  >
+                    <Shuffle className="w-4 h-4" /> Re-shuffle
+                  </button>
+                )}
+              </div>
             </div>
-          )}
 
-          {seedingMethod === 'random' && (
-            <Card padding="md" className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-              <p className="text-sm text-blue-900 dark:text-blue-200">
-                Seeds will be assigned randomly when the tournament starts.
+            {/* Seeding method toggle */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => {
+                  setSeedingMethod('random');
+                  handleReshuffle();
+                }}
+                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  seedingMethod === 'random'
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                Random
+              </button>
+              <button
+                onClick={() => setSeedingMethod('manual')}
+                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  seedingMethod === 'manual'
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                Manual Order
+              </button>
+            </div>
+
+            {seedingMethod === 'manual' && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Tap two seeds to swap their positions
               </p>
-            </Card>
-          )}
+            )}
 
+            {/* Seed list */}
+            <div className="space-y-1.5">
+              {seededOrder.map((entry, i) => {
+                const player = profileMap.get(entry.id);
+                const partner = entry.partnerId ? profileMap.get(entry.partnerId) : null;
+                const isSwapSelected = swapSelection === i;
+                return (
+                  <button
+                    key={entry.id}
+                    onClick={() => seedingMethod === 'manual' ? handleSeedTap(i) : undefined}
+                    className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors ${
+                      isSwapSelected
+                        ? 'bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-500'
+                        : seedingMethod === 'manual'
+                          ? 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
+                          : 'bg-gray-50 dark:bg-gray-800 border-2 border-transparent'
+                    }`}
+                  >
+                    <span className="text-sm font-bold text-gray-400 w-8 text-right">#{entry.seed}</span>
+                    <Avatar name={player?.display_name || '?'} size="xs" />
+                    <span className="text-sm text-gray-900 dark:text-white truncate">
+                      {player?.display_name}
+                      {partner && ` & ${partner.display_name}`}
+                    </span>
+                    {seedingMethod === 'manual' && (
+                      <ArrowUpDown className="w-3 h-3 text-gray-400 ml-auto" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Bracket preview info */}
+          <Card padding="md">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bracket Info</h3>
+            <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+              <p>{participantCount} {isDoubles ? 'teams' : 'players'} • {tournamentFormat === 'single_elimination' ? 'Single' : 'Double'} Elimination</p>
+              <p>{totalRounds} rounds{byeCount > 0 ? ` • ${byeCount} bye${byeCount > 1 ? 's' : ''}` : ''}</p>
+              {/* Show first round matchups */}
+              {seededOrder.length >= 2 && (
+                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">First round matchups:</p>
+                  {(() => {
+                    const bs = nextPowerOf2(seededOrder.length);
+                    const matchups: Array<[number, number]> = [];
+                    // Simple matchup preview: 1vN, 2v(N-1), etc.
+                    for (let i = 0; i < Math.floor(bs / 2); i++) {
+                      matchups.push([i + 1, bs - i]);
+                    }
+                    return matchups.slice(0, 8).map(([s1, s2]) => {
+                      const p1 = s1 <= seededOrder.length ? profileMap.get(seededOrder[s1 - 1].id) : null;
+                      const p2 = s2 <= seededOrder.length ? profileMap.get(seededOrder[s2 - 1].id) : null;
+                      const p1Partner = s1 <= seededOrder.length && seededOrder[s1 - 1].partnerId
+                        ? profileMap.get(seededOrder[s1 - 1].partnerId!) : null;
+                      const p2Partner = s2 <= seededOrder.length && seededOrder[s2 - 1].partnerId
+                        ? profileMap.get(seededOrder[s2 - 1].partnerId!) : null;
+
+                      const name1 = p1 ? (p1Partner ? `${p1.display_name} & ${p1Partner.display_name}` : p1.display_name) : null;
+                      const name2 = p2 ? (p2Partner ? `${p2.display_name} & ${p2Partner.display_name}` : p2.display_name) : null;
+
+                      return (
+                        <p key={`${s1}-${s2}`} className="text-xs">
+                          <span className="text-gray-400">#{s1}</span> {name1 || '—'} vs{' '}
+                          {name2 ? <><span className="text-gray-400">#{s2}</span> {name2}</> : <span className="text-green-600">BYE</span>}
+                        </p>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Button
+            onClick={() => setStep(previewStep)}
+            disabled={seededOrder.length < 2}
+            className="w-full"
+          >
+            Next: Preview & Create
+          </Button>
+        </div>
+      )}
+
+      {/* ========== PREVIEW & CREATE STEP ========== */}
+      {step === previewStep && (
+        <div className="space-y-4">
+          <Card padding="md">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
+                <Trophy className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">
+                  {tournamentName.trim() || `${gameTypes.find(g => g.id === selectedGameType)?.name || 'Pool'} Tournament`}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {tournamentFormat === 'single_elimination' ? 'Single' : 'Double'} Elimination •{' '}
+                  {matchMode === 'singles' ? 'Singles' : matchMode === 'doubles' ? 'Doubles' : 'Scotch Doubles'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              <p>{participantCount} {isDoubles ? 'teams' : 'players'} • {totalRounds} rounds</p>
+              <p>
+                Each match:{' '}
+                {matchFormat === 'single' ? 'Single game' : matchFormat === 'race_to' ? `Race to ${matchFormatTarget}` : `Best of ${matchFormatTarget}`}
+              </p>
+              {byeCount > 0 && <p>{byeCount} bye{byeCount > 1 ? 's' : ''} (top seeds advance)</p>}
+            </div>
+          </Card>
+
+          {/* Seeded lineup */}
+          <Card padding="md">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bracket Order</h3>
+            <div className="space-y-1">
+              {seededOrder.map(entry => {
+                const player = profileMap.get(entry.id);
+                const partner = entry.partnerId ? profileMap.get(entry.partnerId) : null;
+                return (
+                  <div key={entry.id} className="flex items-center gap-2 py-1">
+                    <span className="text-xs font-bold text-gray-400 w-6 text-right">#{entry.seed}</span>
+                    <Avatar name={player?.display_name || '?'} size="xs" />
+                    <span className="text-sm text-gray-900 dark:text-white">
+                      {player?.display_name}{partner ? ` & ${partner.display_name}` : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Button
+            onClick={handleCreate}
+            disabled={isCreating}
+            className="w-full"
+          >
+            {isCreating ? 'Creating...' : 'Start Tournament'}
+          </Button>
+        </div>
+      )}
+
+      {/* Add Player Modal */}
+      <Modal isOpen={showNewPlayer} onClose={() => setShowNewPlayer(false)} title="Add Player">
+        <div className="space-y-3">
+          <Input
+            value={newPlayerName}
+            onChange={e => setNewPlayerName(e.target.value)}
+            placeholder="Player name"
+            autoFocus
+            onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
+          />
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setStep(2)} className="flex-1">
-              Back
+            <Button variant="secondary" onClick={() => setShowNewPlayer(false)} className="flex-1">
+              Cancel
             </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={isCreating}
-              loading={isCreating}
-              className="flex-1"
-            >
-              <Trophy className="w-4 h-4 mr-2" /> Create Tournament
+            <Button onClick={handleAddPlayer} disabled={!newPlayerName.trim()} className="flex-1">
+              Add
             </Button>
           </div>
         </div>
-      </PageWrapper>
-    );
-  }
-
-  return null;
+      </Modal>
+    </PageWrapper>
+  );
 }
