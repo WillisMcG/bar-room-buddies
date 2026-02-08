@@ -14,6 +14,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { db, getDeviceId } from '@/lib/db/dexie';
 import { getWinPercentage } from '@/lib/utils';
 import type { LocalProfile } from '@/lib/db/dexie';
+import { useAuth } from '@/contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { Users } from 'lucide-react';
 
@@ -24,6 +25,7 @@ interface PlayerWithStats extends LocalProfile {
 }
 
 export default function PlayersPage() {
+  const { venueId } = useAuth();
   const [players, setPlayers] = useState<PlayerWithStats[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -32,7 +34,8 @@ export default function PlayersPage() {
 
   const loadPlayers = async () => {
     const allProfiles = await db.profiles.toArray();
-    const active = allProfiles.filter((p) => !p.merged_into);
+    const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId) : allProfiles;
+    const active = venueProfiles.filter((p) => !p.merged_into);
 
     // Pre-load all session games once to avoid repeated queries
     const allSessionGames = await db.sessionGames.toArray();
@@ -87,7 +90,7 @@ export default function PlayersPage() {
 
   useEffect(() => {
     loadPlayers();
-  }, []);
+  }, [venueId]);
 
   const handleAddPlayer = async () => {
     if (!newName.trim()) return;
@@ -102,6 +105,7 @@ export default function PlayersPage() {
       merged_into: null,
       created_at: new Date().toISOString(),
       synced: false,
+      venue_id: venueId,
     });
     setNewName('');
     setShowAdd(false);

@@ -12,6 +12,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { db } from '@/lib/db/dexie';
 import { seedSystemGameTypes } from '@/lib/db/dexie';
 import { formatDateTime, matchFormatLabel } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import type { LocalMatch, LocalProfile, LocalGameType, LocalSession } from '@/lib/db/dexie';
 
 interface RecentMatch extends LocalMatch {
@@ -21,6 +22,7 @@ interface RecentMatch extends LocalMatch {
 }
 
 export default function HomePage() {
+  const { venueId } = useAuth();
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const [activeSessions, setActiveSessions] = useState<(LocalSession & { gameType?: LocalGameType; playerNames: string[] })[]>([]);
   const [playerCount, setPlayerCount] = useState(0);
@@ -30,12 +32,13 @@ export default function HomePage() {
   useEffect(() => {
     const loadData = async () => {
       await seedSystemGameTypes();
-      
-      const matches = await db.matches
+
+      const allMatches = await db.matches
         .orderBy('started_at')
         .reverse()
-        .limit(5)
         .toArray();
+      const filteredMatches = venueId ? allMatches.filter(m => m.venue_id === venueId) : allMatches;
+      const matches = filteredMatches.slice(0, 5);
 
       const enriched = await Promise.all(
         matches.map(async (m) => {
@@ -51,7 +54,8 @@ export default function HomePage() {
       setRecentMatches(enriched);
 
       // Load active sessions
-      const sessions = await db.sessions.where('status').equals('active').toArray();
+      const allSessions = await db.sessions.where('status').equals('active').toArray();
+      const sessions = venueId ? allSessions.filter(s => s.venue_id === venueId) : allSessions;
       const enrichedSessions = await Promise.all(
         sessions.map(async (s) => {
           const gt = await db.gameTypes.get(s.game_type_id);
@@ -65,13 +69,21 @@ export default function HomePage() {
       );
       setActiveSessions(enrichedSessions);
 
-      setPlayerCount(await db.profiles.count());
-      setMatchCount(await db.matches.where('status').equals('completed').count());
+      // Get player count filtered by venue
+      const allProfiles = await db.profiles.toArray();
+      const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId) : allProfiles;
+      setPlayerCount(venueProfiles.length);
+
+      // Get match count filtered by venue
+      const allCompletedMatches = await db.matches.where('status').equals('completed').toArray();
+      const venueMatches = venueId ? allCompletedMatches.filter(m => m.venue_id === venueId) : allCompletedMatches;
+      setMatchCount(venueMatches.length);
+
       setIsLoading(false);
     };
 
     loadData();
-  }, []);
+  }, [venueId]);
 
   return (
     <PageWrapper>

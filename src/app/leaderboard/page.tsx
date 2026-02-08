@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card';
 import Avatar from '@/components/ui/Avatar';
 import EmptyState from '@/components/ui/EmptyState';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/db/dexie';
 import { getWinPercentage } from '@/lib/utils';
 import type { LocalProfile, LocalGameType } from '@/lib/db/dexie';
@@ -23,6 +24,7 @@ type TimePeriod = 'all' | '30' | '90';
 
 export default function LeaderboardPage() {
   const { venue } = useTheme();
+  const { venueId } = useAuth();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
   const [selectedGameType, setSelectedGameType] = useState<string>('all');
@@ -40,7 +42,8 @@ export default function LeaderboardPage() {
   useEffect(() => {
     const loadLeaderboard = async () => {
       setIsLoading(true);
-      const profiles = (await db.profiles.toArray()).filter((p) => !p.merged_into);
+      const allProfiles = await db.profiles.toArray();
+      const profiles = allProfiles.filter((p) => !p.merged_into && (!venueId || p.venue_id === venueId));
 
       const cutoff = timePeriod !== 'all'
         ? new Date(Date.now() - parseInt(timePeriod) * 24 * 60 * 60 * 1000).toISOString()
@@ -124,7 +127,7 @@ export default function LeaderboardPage() {
     };
 
     loadLeaderboard();
-  }, [selectedGameType, timePeriod]);
+  }, [selectedGameType, timePeriod, venueId]);
 
   const getRankStyle = (rank: number) => {
     if (rank === 0) return 'text-yellow-500';
