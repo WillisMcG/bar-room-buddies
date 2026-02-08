@@ -75,7 +75,11 @@ export default function NewSessionPage() {
     };
     await db.profiles.add(newPlayer);
     setPlayers(prev => [...prev, newPlayer].sort((a, b) => a.display_name.localeCompare(b.display_name)));
-    setSelectedPlayerIds(prev => new Set([...prev, newPlayer.id]));
+    setSelectedPlayerIds(prev => {
+      const next = new Set(Array.from(prev));
+      next.add(newPlayer.id);
+      return next;
+    });
     setNewPlayerName('');
     setShowNewPlayer(false);
   };
