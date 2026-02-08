@@ -1,0 +1,46 @@
+{
+  "name": "bar-room-buddies",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "supabase": "supabase",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:reset": "supabase db reset",
+    "supabase:migrate": "supabase db push",
+    "supabase:gen-types": "supabase gen types typescript --local > src/types/supabase.ts",
+    "supabase:link": "supabase link",
+    "supabase:push": "supabase db push"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "@supabase/ssr": "^0.5.0",
+    "dexie": "^4.0.0",
+    "dexie-react-hooks": "^1.1.7",
+    "lucide-react": "^0.400.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.4.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.5.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.0",
+    "supabase": "^2.0.0"
+  }
+}
