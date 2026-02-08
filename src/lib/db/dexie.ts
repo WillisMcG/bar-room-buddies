@@ -107,6 +107,77 @@ export interface LocalSessionGame {
   synced: boolean;
 }
 
+export type TournamentFormat = 'single_elimination' | 'double_elimination';
+export type TournamentStatus = 'setup' | 'in_progress' | 'completed';
+export type BracketType = 'winners' | 'losers' | 'grand_final';
+export type TournamentMatchStatus = 'pending' | 'ready' | 'in_progress' | 'completed';
+
+export interface LocalTournament {
+  id: string;
+  name: string;
+  game_type_id: string;
+  format: TournamentFormat;
+  match_mode: MatchMode;
+  match_format: 'single' | 'race_to' | 'best_of';
+  match_format_target: number | null;
+  status: TournamentStatus;
+  seeding_method: 'random' | 'manual';
+  total_participants: number;
+  started_at: string;
+  completed_at: string | null;
+  winner_id: string | null;
+  venue_id: string | null;
+  synced: boolean;
+  local_updated_at: string;
+}
+
+export interface LocalTournamentParticipant {
+  id: string;
+  tournament_id: string;
+  player_id: string;
+  partner_id: string | null;
+  seed_position: number;
+  status: 'active' | 'eliminated';
+  eliminated_round: number | null;
+  synced: boolean;
+}
+
+export interface LocalTournamentMatch {
+  id: string;
+  tournament_id: string;
+  match_number: number;
+  round_number: number;
+  match_order_in_round: number;
+  bracket_type: BracketType;
+  player_1_id: string | null;
+  player_2_id: string | null;
+  player_1_partner_id: string | null;
+  player_2_partner_id: string | null;
+  player_1_seed: number | null;
+  player_2_seed: number | null;
+  player_1_score: number;
+  player_2_score: number;
+  winner_id: string | null;
+  is_bye: boolean;
+  status: TournamentMatchStatus;
+  completed_at: string | null;
+  next_winner_match_id: string | null;
+  next_winner_slot: 'player_1' | 'player_2' | null;
+  next_loser_match_id: string | null;
+  next_loser_slot: 'player_1' | 'player_2' | null;
+  synced: boolean;
+  local_updated_at: string;
+}
+
+export interface LocalTournamentGame {
+  id: string;
+  tournament_match_id: string;
+  game_number: number;
+  winner_id: string;
+  completed_at: string;
+  synced: boolean;
+}
+
 export interface SyncMeta {
   key: string;
   value: string;
@@ -123,6 +194,10 @@ class BarRoomBuddiesDB extends Dexie {
   syncMeta!: EntityTable<SyncMeta, 'key'>;
   sessions!: EntityTable<LocalSession, 'id'>;
   sessionGames!: EntityTable<LocalSessionGame, 'id'>;
+  tournaments!: EntityTable<LocalTournament, 'id'>;
+  tournamentParticipants!: EntityTable<LocalTournamentParticipant, 'id'>;
+  tournamentMatches!: EntityTable<LocalTournamentMatch, 'id'>;
+  tournamentGames!: EntityTable<LocalTournamentGame, 'id'>;
 
   constructor() {
     super('BarRoomBuddiesDB');
@@ -176,6 +251,22 @@ class BarRoomBuddiesDB extends Dexie {
         if (!game.prev_table_teams) game.prev_table_teams = null;
         if (!game.prev_team_queue) game.prev_team_queue = [];
       });
+    });
+
+    // v4: Add tournament bracket support
+    this.version(4).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, match_mode, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, session_mode, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
+      tournaments: 'id, game_type_id, format, match_mode, status, started_at, venue_id, synced',
+      tournamentParticipants: 'id, tournament_id, player_id, seed_position, status, synced',
+      tournamentMatches: 'id, tournament_id, round_number, bracket_type, status, winner_id, synced',
+      tournamentGames: 'id, tournament_match_id, game_number, winner_id, synced',
     });
   }
 }
