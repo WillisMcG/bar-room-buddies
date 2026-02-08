@@ -181,6 +181,16 @@ export interface LocalTournamentGame {
   synced: boolean;
 }
 
+export interface LocalTeam {
+  id: string;
+  player_1_id: string;   // Always the lexicographically smaller ID
+  player_2_id: string;   // Always the lexicographically larger ID
+  team_name: string;     // Editable display name
+  created_at: string;
+  venue_id: string | null;
+  synced: boolean;
+}
+
 export interface SyncMeta {
   key: string;
   value: string;
@@ -201,6 +211,7 @@ class BarRoomBuddiesDB extends Dexie {
   tournamentParticipants!: EntityTable<LocalTournamentParticipant, 'id'>;
   tournamentMatches!: EntityTable<LocalTournamentMatch, 'id'>;
   tournamentGames!: EntityTable<LocalTournamentGame, 'id'>;
+  teams!: EntityTable<LocalTeam, 'id'>;
 
   constructor() {
     super('BarRoomBuddiesDB');
@@ -311,6 +322,23 @@ class BarRoomBuddiesDB extends Dexie {
       tx.table('sessions').toCollection().modify(session => {
         if (!session.rotation_mode) session.rotation_mode = 'king_of_table';
       });
+    });
+
+    // v7: Add teams table for persistent team names and stats
+    this.version(7).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, venue_id, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, match_mode, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, session_mode, rotation_mode, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
+      tournaments: 'id, game_type_id, format, match_mode, status, started_at, venue_id, synced',
+      tournamentParticipants: 'id, tournament_id, player_id, seed_position, status, synced',
+      tournamentMatches: 'id, tournament_id, round_number, bracket_type, status, winner_id, synced',
+      tournamentGames: 'id, tournament_match_id, game_number, winner_id, synced',
+      teams: 'id, [player_1_id+player_2_id], player_1_id, player_2_id, venue_id, synced',
     });
   }
 }
