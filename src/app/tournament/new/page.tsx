@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Plus, Shuffle, Trophy, ArrowUpDown } from 'lucide-react';
+import { ArrowLeft, Check, UserPlus, Shuffle, Trophy, ArrowUpDown } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -69,9 +69,12 @@ export default function NewTournamentPage() {
       setGameTypes(types);
       setPlayers(activePlayers);
       if (types.length > 0) {
-        setSelectedGameType(types[0].id);
-        if (types[0].default_format) setMatchFormat(types[0].default_format);
-        if (types[0].default_format_target) setMatchFormatTarget(types[0].default_format_target);
+        // Default to 8-Ball if available, otherwise first type
+        const eightBall = types.find(t => t.name === '8-Ball');
+        const defaultType = eightBall || types[0];
+        setSelectedGameType(defaultType.id);
+        if (defaultType.default_format) setMatchFormat(defaultType.default_format);
+        if (defaultType.default_format_target) setMatchFormatTarget(defaultType.default_format_target);
       }
       setIsLoading(false);
     };
@@ -499,51 +502,61 @@ export default function NewTournamentPage() {
         <div className="space-y-4">
           <Card padding="md">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
                 Select Players ({selectedPlayerIds.size} selected)
               </h3>
               <button
                 onClick={() => setShowNewPlayer(true)}
-                className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400"
+                className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 hover:underline"
               >
-                <Plus className="w-4 h-4" /> Add New
+                <UserPlus className="w-3.5 h-3.5" /> Add New
               </button>
             </div>
 
             {!hasEnoughPlayers && selectedPlayerIds.size > 0 && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+              <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
                 {isDoubles
-                  ? 'Need at least 4 players (even number) for doubles tournament'
-                  : 'Need at least 3 players for a tournament'}
+                  ? 'Select at least 4 players (even number) for doubles tournament'
+                  : 'Select at least 3 players for a tournament'}
               </p>
             )}
 
-            <div className="grid grid-cols-3 gap-2">
-              {players.map(player => {
-                const isSelected = selectedPlayerIds.has(player.id);
-                return (
-                  <button
-                    key={player.id}
-                    onClick={() => togglePlayer(player.id)}
-                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-colors ${
-                      isSelected
-                        ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                        : 'border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    {isSelected && (
-                      <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
-                        <Check className="w-3 h-3 text-white" />
-                      </div>
-                    )}
-                    <Avatar name={player.display_name} size="sm" />
-                    <span className="text-xs mt-1 text-gray-900 dark:text-white truncate w-full text-center">
-                      {player.display_name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            {players.length === 0 ? (
+              <div className="text-center py-6">
+                <UserPlus className="w-8 h-8 mx-auto text-gray-400 mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No players yet</p>
+                <Button variant="primary" onClick={() => setShowNewPlayer(true)}>
+                  <UserPlus className="w-4 h-4 mr-2" /> Add Players
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {players.map(player => {
+                  const isSelected = selectedPlayerIds.has(player.id);
+                  return (
+                    <button
+                      key={player.id}
+                      onClick={() => togglePlayer(player.id)}
+                      className={`relative flex flex-col items-center gap-1 p-3 rounded-lg transition-colors ${
+                        isSelected
+                          ? 'bg-green-50 dark:bg-green-900/20 border-2 border-green-500'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                      }`}
+                    >
+                      {isSelected && (
+                        <div className="absolute top-1 right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                      <Avatar name={player.display_name} imageUrl={player.avatar_url} size="sm" />
+                      <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                        {player.display_name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           <Button
