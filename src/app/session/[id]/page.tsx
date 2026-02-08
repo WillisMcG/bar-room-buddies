@@ -3,12 +3,13 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Undo2, Flag, Users, ArrowRight, Trophy, Shuffle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Undo2, Flag, Users, ArrowRight, Trophy, Shuffle, ChevronDown, ChevronUp, UserPlus, Plus, X, RotateCcw } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Modal from '@/components/ui/Modal';
-import { db } from '@/lib/db/dexie';
+import Input from '@/components/ui/Input';
+import { db, getDeviceId } from '@/lib/db/dexie';
 import type { LocalSession, LocalSessionGame, LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDuration, formatDateTime } from '@/lib/utils';
@@ -51,6 +52,13 @@ export default function SessionPage() {
   const [pickTeam1, setPickTeam1] = useState<[string, string] | null>(null);
   const [pickTeam2, setPickTeam2] = useState<[string, string] | null>(null);
   const [showGameLog, setShowGameLog] = useState(false);
+  const [showManagePlayers, setShowManagePlayers] = useState(false);
+  const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [addPlayerSearch, setAddPlayerSearch] = useState('');
+  const [availablePlayers, setAvailablePlayers] = useState<LocalProfile[]>([]);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [addTeamPlayer1, setAddTeamPlayer1] = useState('');
+  const [addTeamPlayer2, setAddTeamPlayer2] = useState('');
 
   // Helper to check if session is doubles mode
   const isDoubles = session?.session_mode === 'doubles' || session?.session_mode === 'scotch_doubles';
@@ -321,6 +329,114 @@ export default function SessionPage() {
     setShowEndConfirm(false);
   };
 
+  const loadAvailablePlayers = async () => {
+    const allProfiles = await db.profiles.toArray();
+    const currentIds = new Set(session?.participant_ids || []);
+    setAvailablePlayers(allProfiles.filter(p => !p.merged_into && !currentIds.has(p.id)));
+  };
+
+  const openManagePlayers = async () => {
+    await loadAvailablePlayers();
+    setShowManagePlayers(true);
+  };
+
+  const addPlayerToSession = async (playerId: string) => {
+    if (!session) return;
+    await db.sessions.update(sessionId, {
+      participant_ids: [...session.participant_ids, playerId],
+      waiting_queue: [...session.waiting_queue, playerId],
+      local_updated_at: new Date().toISOString(),
+      synced: false,
+    });
+    await loadSession();
+    // Refresh available list
+    const allProfiles = await db.profiles.toArray();
+    const updatedSession = await db.sessions.get(sessionId);
+    const currentIds = new Set(updatedSession?.participant_ids || []);
+    setAvailablePlayers(allProfiles.filter(p => !p.merged_into && !currentIds.has(p.id)));
+  };
+
+  const createAndAddPlayer = async () => {
+    if (!newPlayerName.trim() || !session) return;
+    const newId = uuidv4();
+    await db.profiles.add({
+      id: newId,
+      email: null,
+      display_name: newPlayerName.trim(),
+      avatar_url: null,
+      avatar_blob: null,
+      is_local: true,
+      device_id: getDeviceId(),
+      merged_into: null,
+      created_at: new Date().toISOString(),
+      synced: false,
+      venue_id: session.venue_id,
+    });
+    setNewPlayerName('');
+    if (isDoubles) {
+      // For doubles, just create profile — user picks teams separately
+      await loadSession();
+      await loadAvailablePlayers();
+    } else {
+      await addPlayerToSession(newId);
+    }
+  };
+
+  const removePlayerFromSession = async (playerId: string) => {
+    if (!session || session.table_player_ids.includes(playerId)) return;
+    await db.sessions.update(sessionId, {
+      participant_ids: session.participant_ids.filter(id => id !== playerId),
+      waiting_queue: session.waiting_queue.filter(id => id !== playerId),
+      local_updated_at: new Date().toISOString(),
+      synced: false,
+    });
+    await loadSession();
+  };
+
+  const addTeamToSession = async () => {
+    if (!session || !addTeamPlayer1 || !addTeamPlayer2 || addTeamPlayer1 === addTeamPlayer2) return;
+    const team: [string, string] = [addTeamPlayer1, addTeamPlayer2];
+    await db.sessions.update(sessionId, {
+      participant_ids: Array.from(new Set([...session.participant_ids, ...team])),
+      teams: [...(session.teams || []), team],
+      waiting_team_queue: [...session.waiting_team_queue, team],
+      local_updated_at: new Date().toISOString(),
+      synced: false,
+    });
+    setAddTeamPlayer1('');
+    setAddTeamPlayer2('');
+    setShowAddPlayer(false);
+    await loadSession();
+    await loadAvailablePlayers();
+  };
+
+  const removeTeamFromSession = async (team: [string, string]) => {
+    if (!session) return;
+    if (session.table_team_ids?.some(t => t[0] === team[0] && t[1] === team[1])) return;
+    const newTeams = (session.teams || []).filter(t => !(t[0] === team[0] && t[1] === team[1]));
+    const newTeamQueue = session.waiting_team_queue.filter(t => !(t[0] === team[0] && t[1] === team[1]));
+    const idsInUse = new Set([...newTeams.flat(), ...(session.table_team_ids?.flat() || [])]);
+    await db.sessions.update(sessionId, {
+      participant_ids: session.participant_ids.filter(id => idsInUse.has(id)),
+      teams: newTeams,
+      waiting_team_queue: newTeamQueue,
+      local_updated_at: new Date().toISOString(),
+      synced: false,
+    });
+    await loadSession();
+  };
+
+  const resumeSession = async () => {
+    if (!session) return;
+    await db.sessions.update(sessionId, {
+      status: 'active' as const,
+      completed_at: null,
+      local_updated_at: new Date().toISOString(),
+      synced: false,
+    });
+    await loadSession();
+  };
+
   const applyPickPlayers = async () => {
     if (!session) return;
 
@@ -497,6 +613,9 @@ export default function SessionPage() {
           <Button variant="secondary" className="flex-1" onClick={() => router.push('/')}>
             Home
           </Button>
+          <Button variant="primary" className="flex-1" onClick={resumeSession}>
+            <RotateCcw className="w-4 h-4 mr-1" /> Resume
+          </Button>
           <Button variant="accent" className="flex-1" onClick={() => router.push('/session/new')}>
             New Session
           </Button>
@@ -524,7 +643,7 @@ export default function SessionPage() {
           {gameType?.name} &middot; {modeLabel} &middot; {
             session.rotation_mode === 'king_of_table' ? 'King of the Table'
             : session.rotation_mode === 'round_robin' ? 'Round Robin'
-            : session.rotation_mode === 'winners_out' ? "Winner’s Out"
+            : session.rotation_mode === 'winners_out' ? "Winner's Out"
             : session.rotation_mode === 'straight_rotation' ? 'Straight Rotation'
             : 'Open Table'
           }
@@ -837,6 +956,14 @@ export default function SessionPage() {
           <Shuffle className="w-4 h-4 mr-1" /> Pick
         </Button>
         <Button
+          variant="secondary"
+          size="sm"
+          className="flex-1"
+          onClick={openManagePlayers}
+        >
+          <UserPlus className="w-4 h-4 mr-1" /> +/-
+        </Button>
+        <Button
           variant="danger"
           size="sm"
           className="flex-1"
@@ -997,6 +1124,226 @@ export default function SessionPage() {
           </div>
         </Modal>
       )}
+
+      {/* Manage Players/Teams Modal */}
+      <Modal
+        isOpen={showManagePlayers}
+        onClose={() => { setShowManagePlayers(false); setShowAddPlayer(false); setNewPlayerName(''); setAddPlayerSearch(''); setAddTeamPlayer1(''); setAddTeamPlayer2(''); }}
+        title={isDoubles ? 'Manage Teams' : 'Manage Players'}
+      >
+        <div className="space-y-4">
+          {/* Current players/teams list */}
+          {isDoubles ? (
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Current Teams</div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {session.teams?.map((team) => {
+                  const p1 = profiles.get(team[0]);
+                  const p2 = profiles.get(team[1]);
+                  const onTable = session.table_team_ids?.some(t => t[0] === team[0] && t[1] === team[1]);
+                  return (
+                    <div key={`${team[0]}-${team[1]}`} className="flex items-center gap-2 py-1.5 px-2 rounded-lg">
+                      <div className="flex gap-1">
+                        <Avatar name={p1?.display_name || ''} imageUrl={p1?.avatar_url} size="sm" />
+                        <Avatar name={p2?.display_name || ''} imageUrl={p2?.avatar_url} size="sm" />
+                      </div>
+                      <span className="text-sm text-gray-900 dark:text-white flex-1 truncate">
+                        {p1?.display_name} & {p2?.display_name}
+                      </span>
+                      {onTable ? (
+                        <span className="text-[10px] text-green-600 dark:text-green-400 font-medium flex-shrink-0">ON TABLE</span>
+                      ) : (
+                        <button
+                          onClick={() => removeTeamFromSession(team)}
+                          className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex-shrink-0"
+                        >
+                          <X className="w-4 h-4 text-red-500" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Current Players</div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {session.participant_ids.map(pid => {
+                  const p = profiles.get(pid);
+                  const onTable = session.table_player_ids.includes(pid);
+                  return (
+                    <div key={pid} className="flex items-center gap-2 py-1.5 px-2 rounded-lg">
+                      <Avatar name={p?.display_name || ''} imageUrl={p?.avatar_url} size="sm" />
+                      <span className="text-sm text-gray-900 dark:text-white flex-1">{p?.display_name}</span>
+                      {onTable ? (
+                        <span className="text-[10px] text-green-600 dark:text-green-400 font-medium flex-shrink-0">ON TABLE</span>
+                      ) : (
+                        <button
+                          onClick={() => removePlayerFromSession(pid)}
+                          className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex-shrink-0"
+                        >
+                          <X className="w-4 h-4 text-red-500" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Add player/team section */}
+          {!showAddPlayer ? (
+            <Button
+              variant="primary"
+              size="sm"
+              className="w-full"
+              onClick={() => { setShowAddPlayer(true); loadAvailablePlayers(); }}
+            >
+              <Plus className="w-4 h-4 mr-1" /> {isDoubles ? 'Add Team' : 'Add Player'}
+            </Button>
+          ) : isDoubles ? (
+            /* Doubles: Add Team Flow */
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Add Team — Pick 2 Players</div>
+
+              {/* Create new player */}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Create new player"
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && createAndAddPlayer()}
+                />
+                <Button variant="accent" size="sm" onClick={createAndAddPlayer} disabled={!newPlayerName.trim()}>
+                  Create
+                </Button>
+              </div>
+
+              {/* Pick from available players */}
+              {availablePlayers.length > 0 ? (
+                <div className="space-y-1 max-h-36 overflow-y-auto">
+                  {availablePlayers.map(p => {
+                    const isP1 = addTeamPlayer1 === p.id;
+                    const isP2 = addTeamPlayer2 === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          if (isP1) setAddTeamPlayer1('');
+                          else if (isP2) setAddTeamPlayer2('');
+                          else if (!addTeamPlayer1) setAddTeamPlayer1(p.id);
+                          else if (!addTeamPlayer2) setAddTeamPlayer2(p.id);
+                          else setAddTeamPlayer2(p.id);
+                        }}
+                        className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors ${
+                          isP1 ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
+                          : isP2 ? 'bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-sm text-gray-900 dark:text-white flex-1 text-left">{p.display_name}</span>
+                        {isP1 && <span className="text-xs text-blue-600">Player 1</span>}
+                        {isP2 && <span className="text-xs text-red-600">Player 2</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 text-center py-2">No available players. Create one above.</p>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => { setShowAddPlayer(false); setAddTeamPlayer1(''); setAddTeamPlayer2(''); setNewPlayerName(''); }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={addTeamToSession}
+                  disabled={!addTeamPlayer1 || !addTeamPlayer2 || addTeamPlayer1 === addTeamPlayer2}
+                >
+                  Add Team
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* Singles: Add Player Flow */
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Add Player</div>
+
+              {/* Create new */}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="New player name"
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && createAndAddPlayer()}
+                />
+                <Button variant="accent" size="sm" onClick={createAndAddPlayer} disabled={!newPlayerName.trim()}>
+                  Create
+                </Button>
+              </div>
+
+              {/* Existing players */}
+              {availablePlayers.length > 0 && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Or add existing player:</div>
+                  {availablePlayers.length > 5 && (
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={addPlayerSearch}
+                      onChange={(e) => setAddPlayerSearch(e.target.value)}
+                      className="w-full mb-2 px-3 py-1.5 text-sm rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                  )}
+                  <div className="space-y-1 max-h-36 overflow-y-auto">
+                    {availablePlayers
+                      .filter(p => !addPlayerSearch || p.display_name.toLowerCase().includes(addPlayerSearch.toLowerCase()))
+                      .map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => addPlayerToSession(p.id)}
+                          className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                          <span className="text-sm text-gray-900 dark:text-white flex-1 text-left">{p.display_name}</span>
+                          <Plus className="w-4 h-4 text-green-500" />
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                onClick={() => { setShowAddPlayer(false); setNewPlayerName(''); setAddPlayerSearch(''); }}
+              >
+                Done
+              </Button>
+            </div>
+          )}
+
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={() => { setShowManagePlayers(false); setShowAddPlayer(false); setNewPlayerName(''); setAddPlayerSearch(''); }}
+          >
+            Close
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
