@@ -68,6 +68,24 @@ export function generateAvatarColor(name: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
+/**
+ * Fisher-Yates shuffle then pair adjacent elements into teams.
+ * Requires an even number of player IDs.
+ */
+export function shuffleTeams(playerIds: string[]): Array<[string, string]> {
+  const arr = [...playerIds];
+  // Fisher-Yates shuffle
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  const teams: Array<[string, string]> = [];
+  for (let i = 0; i < arr.length; i += 2) {
+    teams.push([arr[i], arr[i + 1]]);
+  }
+  return teams;
+}
+
 export function matchFormatLabel(format: string, target: number | null): string {
   switch (format) {
     case 'single':

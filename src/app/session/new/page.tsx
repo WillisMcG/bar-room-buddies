@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UserPlus, Check, ArrowRight, Users2 } from 'lucide-react';
+import { UserPlus, Check, ArrowRight, Shuffle, Users2 } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -11,6 +11,7 @@ import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId, seedSystemGameTypes } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import { shuffleTeams } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
 type Step = 'game_type' | 'players' | 'team_pairing' | 'table_setup';
@@ -94,6 +95,27 @@ export default function NewSessionPage() {
 
   const removeTeamPairing = (index: number) => {
     setPairedTeams(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRandomizeAllTeams = () => {
+    // Find players not yet on a team
+    const teamed = new Set<string>();
+    pairedTeams.forEach(([p1, p2]) => { teamed.add(p1); teamed.add(p2); });
+    const unpairedIds = Array.from(selectedPlayerIds).filter(id => !teamed.has(id));
+    if (unpairedIds.length < 2 || unpairedIds.length % 2 !== 0) return;
+    const newTeams = shuffleTeams(unpairedIds);
+    setPairedTeams(prev => [...prev, ...newTeams]);
+    setTeamPairingSelection([]);
+  };
+
+  const handleRandomizeFromScratch = () => {
+    const ids = Array.from(selectedPlayerIds);
+    if (ids.length < 4 || ids.length % 2 !== 0) return;
+    const newTeams = shuffleTeams(ids);
+    setPairedTeams(newTeams);
+    setTeamPairingSelection([]);
+    setTableTeam1(null);
+    setTableTeam2(null);
   };
 
   const allPlayersTeamed = (): boolean => {
@@ -429,7 +451,29 @@ export default function NewSessionPage() {
         <>
           <Card className="mb-4">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Pair Teams</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two players to pair them as a team</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Randomize teams or tap two players to pair manually</p>
+
+            {/* Randomize buttons */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-1"
+                onClick={handleRandomizeFromScratch}
+              >
+                <Shuffle className="w-4 h-4 mr-1" /> {pairedTeams.length > 0 ? 'Re-Shuffle All' : 'Randomize All'}
+              </Button>
+              {pairedTeams.length > 0 && !allPlayersTeamed() && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleRandomizeAllTeams}
+                >
+                  <Shuffle className="w-4 h-4 mr-1" /> Randomize Remaining
+                </Button>
+              )}
+            </div>
 
             {pairedTeams.length > 0 && (
               <div className="space-y-2 mb-4">

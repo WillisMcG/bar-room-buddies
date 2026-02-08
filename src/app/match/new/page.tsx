@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Plus, UserPlus } from 'lucide-react';
+import { ArrowLeft, Check, Plus, Shuffle, UserPlus } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -12,6 +12,7 @@ import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import { shuffleTeams } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
 type DoublesType = 'doubles' | 'scotch_doubles';
@@ -34,8 +35,10 @@ function NewMatchContent() {
   const [selectedGameType, setSelectedGameType] = useState<string>('');
   const [selectedPlayer1, setSelectedPlayer1] = useState<string>('');
   const [selectedPlayer2, setSelectedPlayer2] = useState<string>('');
-  const [selectedPlayer1Partner, setSelectedPlayer1Partner] = useState<string>('');
-  const [selectedPlayer2Partner, setSelectedPlayer2Partner] = useState<string>('');
+  // Doubles: multi-select players then assign to teams
+  const [doublesSelectedIds, setDoublesSelectedIds] = useState<Set<string>>(new Set());
+  const [team1, setTeam1] = useState<[string, string] | null>(null);
+  const [team2, setTeam2] = useState<[string, string] | null>(null);
   const [doublesType, setDoublesType] = useState<DoublesType>('doubles');
   const [format, setFormat] = useState<string>('race_to');
   const [formatTarget, setFormatTarget] = useState<number>(5);
@@ -96,11 +99,78 @@ function NewMatchContent() {
     setShowNewPlayer(false);
   };
 
+  // Doubles helpers
+  const toggleDoublesPlayer = (id: string) => {
+    setDoublesSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        // Clear teams if a team member was deselected
+        if (team1 && (team1[0] === id || team1[1] === id)) setTeam1(null);
+        if (team2 && (team2[0] === id || team2[1] === id)) setTeam2(null);
+      } else {
+        if (next.size < 4) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleRandomizeTeams = () => {
+    const ids = Array.from(doublesSelectedIds);
+    if (ids.length !== 4) return;
+    const teams = shuffleTeams(ids);
+    setTeam1(teams[0]);
+    setTeam2(teams[1]);
+  };
+
+  const assignToTeam = (playerId: string) => {
+    // If already on a team, remove them
+    if (team1 && (team1[0] === playerId || team1[1] === playerId)) {
+      if (team1[0] === playerId) setTeam1(team1[1] ? [team1[1], ''] as any : null);
+      else setTeam1([team1[0], ''] as any);
+      // Clean up incomplete teams
+      setTeam1(prev => {
+        if (!prev) return null;
+        const filtered = [prev[0], prev[1]].filter(Boolean);
+        if (filtered.length === 0) return null;
+        return filtered.length === 1 ? null : prev;
+      });
+      return;
+    }
+    if (team2 && (team2[0] === playerId || team2[1] === playerId)) {
+      setTeam2(prev => {
+        if (!prev) return null;
+        const filtered = [prev[0], prev[1]].filter(id => id !== playerId);
+        if (filtered.length === 0) return null;
+        return filtered.length === 1 ? null : prev;
+      });
+      return;
+    }
+    // Add to team 1 if it needs players
+    if (!team1) {
+      setTeam1([playerId, ''] as any);
+      return;
+    }
+    if (team1 && !team1[1]) {
+      setTeam1([team1[0], playerId]);
+      return;
+    }
+    // Add to team 2 if it needs players
+    if (!team2) {
+      setTeam2([playerId, ''] as any);
+      return;
+    }
+    if (team2 && !team2[1]) {
+      setTeam2([team2[0], playerId]);
+      return;
+    }
+  };
+
+  const teamsComplete = team1 && team2 && team1[0] && team1[1] && team2[0] && team2[1];
+
   const handleStartMatch = async () => {
     if (isDoublesMode) {
-      if (!selectedGameType || !selectedPlayer1 || !selectedPlayer2 || !selectedPlayer1Partner || !selectedPlayer2Partner) return;
-      const uniquePlayers = new Set([selectedPlayer1, selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner]);
-      if (uniquePlayers.size !== 4) return;
+      if (!selectedGameType || !teamsComplete) return;
     } else {
       if (!selectedGameType || !selectedPlayer1 || !selectedPlayer2) return;
       if (selectedPlayer1 === selectedPlayer2) return;
@@ -114,10 +184,10 @@ function NewMatchContent() {
       id: matchId,
       game_type_id: selectedGameType,
       match_mode: matchMode,
-      player_1_id: selectedPlayer1,
-      player_2_id: selectedPlayer2,
-      player_1_partner_id: isDoublesMode ? selectedPlayer1Partner : null,
-      player_2_partner_id: isDoublesMode ? selectedPlayer2Partner : null,
+      player_1_id: isDoublesMode ? team1![0] : selectedPlayer1,
+      player_2_id: isDoublesMode ? team2![0] : selectedPlayer2,
+      player_1_partner_id: isDoublesMode ? team1![1] : null,
+      player_2_partner_id: isDoublesMode ? team2![1] : null,
       format: format as any,
       format_target: format === 'single' ? null : formatTarget,
       player_1_score: 0,
@@ -135,9 +205,8 @@ function NewMatchContent() {
   };
 
   const canStart = isDoublesMode
-    ? selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1Partner && selectedPlayer2Partner &&
-      new Set([selectedPlayer1, selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner]).size === 4
-    : selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1 !== selectedPlayer2;
+    ? !!(selectedGameType && teamsComplete)
+    : !!(selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1 !== selectedPlayer2);
 
   const pageTitle = isDoublesMode ? 'New Doubles Match' : 'New Match';
 
@@ -274,130 +343,198 @@ function NewMatchContent() {
             </Button>
           </div>
         ) : isDoublesMode ? (
-          // Doubles mode UI
+          // Doubles mode: select 4 players then assign to teams
           <div className="space-y-4">
-            {/* Team 1 */}
+            {/* Step 1: Select 4 players */}
             <div>
-              <label className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-2 block">Team 1</label>
-              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar">
-                {/* Player 1A */}
-                <div className="col-span-2">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 1A</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {players.map((p) => (
-                      <button
-                        key={`p1a-${p.id}`}
-                        onClick={() => setSelectedPlayer1(p.id)}
-                        disabled={[selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                          selectedPlayer1 === p.id
-                            ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
-                            : [selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)
-                            ? 'opacity-30 cursor-not-allowed'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                        }`}
-                      >
-                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                          {p.display_name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Player 1B */}
-                <div className="col-span-2">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 1B</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {players.map((p) => (
-                      <button
-                        key={`p1b-${p.id}`}
-                        onClick={() => setSelectedPlayer1Partner(p.id)}
-                        disabled={[selectedPlayer1, selectedPlayer2, selectedPlayer2Partner].includes(p.id)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                          selectedPlayer1Partner === p.id
-                            ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
-                            : [selectedPlayer1, selectedPlayer2, selectedPlayer2Partner].includes(p.id)
-                            ? 'opacity-30 cursor-not-allowed'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                        }`}
-                      >
-                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                          {p.display_name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Select 4 players ({doublesSelectedIds.size}/4)
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {players.map((p) => {
+                  const isSelected = doublesSelectedIds.has(p.id);
+                  const isFull = doublesSelectedIds.size >= 4 && !isSelected;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => toggleDoublesPlayer(p.id)}
+                      disabled={isFull}
+                      className={`relative flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                        isSelected
+                          ? 'bg-green-50 dark:bg-green-900/20 border-2 border-green-500'
+                          : isFull
+                          ? 'opacity-30 cursor-not-allowed border-2 border-transparent'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                      }`}
+                    >
+                      {isSelected && (
+                        <div className="absolute top-1 right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                          <Check className="w-2.5 h-2.5 text-white" />
+                        </div>
+                      )}
+                      <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                      <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                        {p.display_name}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* VS Divider */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-              <span className="text-xs font-bold text-gray-400">VS</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-            </div>
-
-            {/* Team 2 */}
-            <div>
-              <label className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2 block">Team 2</label>
-              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar">
-                {/* Player 2A */}
-                <div className="col-span-2">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 2A</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {players.map((p) => (
-                      <button
-                        key={`p2a-${p.id}`}
-                        onClick={() => setSelectedPlayer2(p.id)}
-                        disabled={[selectedPlayer1, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                          selectedPlayer2 === p.id
-                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
-                            : [selectedPlayer1, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)
-                            ? 'opacity-30 cursor-not-allowed'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                        }`}
-                      >
-                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                          {p.display_name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+            {/* Step 2: Assign teams (only when 4 players selected) */}
+            {doublesSelectedIds.size === 4 && (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                  <span className="text-xs font-bold text-gray-400">TEAMS</span>
+                  <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
                 </div>
 
-                {/* Player 2B */}
-                <div className="col-span-2">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 2B</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {players.map((p) => (
-                      <button
-                        key={`p2b-${p.id}`}
-                        onClick={() => setSelectedPlayer2Partner(p.id)}
-                        disabled={[selectedPlayer1, selectedPlayer1Partner, selectedPlayer2].includes(p.id)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                          selectedPlayer2Partner === p.id
-                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
-                            : [selectedPlayer1, selectedPlayer1Partner, selectedPlayer2].includes(p.id)
-                            ? 'opacity-30 cursor-not-allowed'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                        }`}
-                      >
-                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                          {p.display_name}
+                {/* Randomize button */}
+                <Button
+                  variant="secondary"
+                  size="md"
+                  className="w-full"
+                  onClick={handleRandomizeTeams}
+                >
+                  <Shuffle className="w-4 h-4 mr-2" />
+                  {teamsComplete ? 'Shuffle Again' : 'Randomize Teams'}
+                </Button>
+
+                {/* Team display / manual assignment */}
+                {teamsComplete ? (
+                  // Show assigned teams
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl border-2 border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30">
+                      <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-2">Team 1</div>
+                      <div className="flex items-center gap-3">
+                        <Avatar name={players.find(p => p.id === team1![0])?.display_name || ''} imageUrl={players.find(p => p.id === team1![0])?.avatar_url} size="md" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === team1![0])?.display_name}
                         </span>
-                      </button>
-                    ))}
+                        <span className="text-xs text-gray-400">&</span>
+                        <Avatar name={players.find(p => p.id === team1![1])?.display_name || ''} imageUrl={players.find(p => p.id === team1![1])?.avatar_url} size="md" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === team1![1])?.display_name}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                      <span className="text-xs font-bold text-gray-400">VS</span>
+                      <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                    </div>
+                    <div className="p-3 rounded-xl border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30">
+                      <div className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2">Team 2</div>
+                      <div className="flex items-center gap-3">
+                        <Avatar name={players.find(p => p.id === team2![0])?.display_name || ''} imageUrl={players.find(p => p.id === team2![0])?.avatar_url} size="md" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === team2![0])?.display_name}
+                        </span>
+                        <span className="text-xs text-gray-400">&</span>
+                        <Avatar name={players.find(p => p.id === team2![1])?.display_name || ''} imageUrl={players.find(p => p.id === team2![1])?.avatar_url} size="md" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === team2![1])?.display_name}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Clear teams to re-pick manually */}
+                    <button
+                      onClick={() => { setTeam1(null); setTeam2(null); }}
+                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline mx-auto block"
+                    >
+                      Clear teams &amp; pick manually
+                    </button>
                   </div>
-                </div>
-              </div>
-            </div>
+                ) : (
+                  // Manual team assignment
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                      Or tap players to assign teams manually
+                    </p>
+
+                    {/* Team 1 slots */}
+                    <div className="p-3 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-700">
+                      <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-2">Team 1</div>
+                      <div className="flex items-center gap-3 min-h-[40px]">
+                        {team1 && team1[0] ? (
+                          <>
+                            <Avatar name={players.find(p => p.id === team1[0])?.display_name || ''} size="sm" />
+                            <span className="text-sm text-gray-900 dark:text-white">{players.find(p => p.id === team1[0])?.display_name}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">Tap a player below</span>
+                        )}
+                        {team1 && team1[1] ? (
+                          <>
+                            <span className="text-xs text-gray-400">&</span>
+                            <Avatar name={players.find(p => p.id === team1[1])?.display_name || ''} size="sm" />
+                            <span className="text-sm text-gray-900 dark:text-white">{players.find(p => p.id === team1[1])?.display_name}</span>
+                          </>
+                        ) : team1 && team1[0] ? (
+                          <span className="text-xs text-gray-400 ml-2">+ 1 more</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {/* Team 2 slots */}
+                    <div className="p-3 rounded-xl border-2 border-dashed border-red-300 dark:border-red-700">
+                      <div className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2">Team 2</div>
+                      <div className="flex items-center gap-3 min-h-[40px]">
+                        {team2 && team2[0] ? (
+                          <>
+                            <Avatar name={players.find(p => p.id === team2[0])?.display_name || ''} size="sm" />
+                            <span className="text-sm text-gray-900 dark:text-white">{players.find(p => p.id === team2[0])?.display_name}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">Fills after Team 1</span>
+                        )}
+                        {team2 && team2[1] ? (
+                          <>
+                            <span className="text-xs text-gray-400">&</span>
+                            <Avatar name={players.find(p => p.id === team2[1])?.display_name || ''} size="sm" />
+                            <span className="text-sm text-gray-900 dark:text-white">{players.find(p => p.id === team2[1])?.display_name}</span>
+                          </>
+                        ) : team2 && team2[0] ? (
+                          <span className="text-xs text-gray-400 ml-2">+ 1 more</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {/* Unassigned players to tap */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {Array.from(doublesSelectedIds).map(id => {
+                        const p = players.find(pl => pl.id === id);
+                        if (!p) return null;
+                        const onTeam1 = team1 && (team1[0] === id || team1[1] === id);
+                        const onTeam2 = team2 && (team2[0] === id || team2[1] === id);
+                        const assigned = onTeam1 || onTeam2;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => assignToTeam(id)}
+                            className={`flex items-center gap-2 p-2 rounded-lg transition-colors ${
+                              onTeam1
+                                ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
+                                : onTeam2
+                                ? 'bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700'
+                                : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-gray-200 dark:border-gray-700'
+                            }`}
+                          >
+                            <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                            <span className="text-xs text-gray-900 dark:text-white truncate">{p.display_name}</span>
+                            {onTeam1 && <span className="text-[10px] text-blue-600 ml-auto">T1</span>}
+                            {onTeam2 && <span className="text-[10px] text-red-600 ml-auto">T2</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         ) : players.length === 1 ? (
           // Singles mode: only 1 player available
