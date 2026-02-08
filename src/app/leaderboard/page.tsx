@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Trophy, Filter } from 'lucide-react';
+import Link from 'next/link';
+import { Trophy, Filter, ChevronRight } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Avatar from '@/components/ui/Avatar';
@@ -196,25 +197,28 @@ export default function LeaderboardPage() {
       ) : (
         <div className="space-y-2">
           {entries.map((entry, idx) => (
-            <Card key={entry.profile.id} padding="sm" className={idx === 0 ? 'border-yellow-500/50' : ''}>
-              <div className="flex items-center gap-3">
-                <div className="w-7 flex items-center justify-center">
-                  {getRankIcon(idx)}
-                </div>
-                <Avatar name={entry.profile.display_name} imageUrl={entry.profile.avatar_url} size="md" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                    {entry.profile.display_name}
+            <Link key={entry.profile.id} href={`/players/${entry.profile.id}`}>
+              <Card padding="sm" className={`hover:border-green-500/50 transition-colors cursor-pointer ${idx === 0 ? 'border-yellow-500/50' : ''}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-7 flex items-center justify-center">
+                    {getRankIcon(idx)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {entry.wins}W - {entry.losses}L &middot; {entry.totalMatches} games
+                  <Avatar name={entry.profile.display_name} imageUrl={entry.profile.avatar_url} size="md" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {entry.profile.display_name}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {entry.wins}W - {entry.losses}L &middot; {entry.totalMatches} games
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-lg font-bold text-gray-900 dark:text-white">{entry.winPct}%</div>
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold text-gray-900 dark:text-white">{entry.winPct}%</div>
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </Link>
           ))}
         </div>
       )}

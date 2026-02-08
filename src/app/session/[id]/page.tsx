@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Undo2, Flag, Users, ArrowRight, Trophy, Shuffle } from 'lucide-react';
+import Link from 'next/link';
+import { Undo2, Flag, Users, ArrowRight, Trophy, Shuffle, ChevronDown, ChevronUp } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -10,7 +11,7 @@ import Modal from '@/components/ui/Modal';
 import { db } from '@/lib/db/dexie';
 import type { LocalSession, LocalSessionGame, LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
-import { formatDuration } from '@/lib/utils';
+import { formatDuration, formatDateTime } from '@/lib/utils';
 
 function TallyMarks({ count }: { count: number }) {
   const groups = Math.floor(count / 5);
@@ -49,6 +50,7 @@ export default function SessionPage() {
   const [pickPlayer2, setPickPlayer2] = useState('');
   const [pickTeam1, setPickTeam1] = useState<[string, string] | null>(null);
   const [pickTeam2, setPickTeam2] = useState<[string, string] | null>(null);
+  const [showGameLog, setShowGameLog] = useState(false);
 
   // Helper to check if session is doubles mode
   const isDoubles = session?.session_mode === 'doubles' || session?.session_mode === 'scotch_doubles';
@@ -171,14 +173,14 @@ export default function SessionPage() {
     let newTablePlayers: [string, string];
 
     if (rotation === 'king_of_table') {
-      // Winner stays, loser \u2192 back of queue, next from queue \u2192 table
+      // Winner stays, loser → back of queue, next from queue → table
       const nextPlayer = newQueue.shift();
       newQueue.push(loserId);
       newTablePlayers = nextPlayer
         ? [winnerId, nextPlayer]
         : [winnerId, loserId];
     } else if (rotation === 'winners_out') {
-      // Winner \u2192 back of queue, loser stays, next from queue plays loser
+      // Winner → back of queue, loser stays, next from queue plays loser
       const nextPlayer = newQueue.shift();
       newQueue.push(winnerId);
       newTablePlayers = nextPlayer
@@ -235,14 +237,14 @@ export default function SessionPage() {
     let newTableTeams: [[string, string], [string, string]];
 
     if (rotation === 'king_of_table') {
-      // Winning team stays, losing team \u2192 back of queue
+      // Winning team stays, losing team → back of queue
       const nextTeam = newTeamQueue.shift();
       newTeamQueue.push(loserTeam);
       newTableTeams = nextTeam
         ? [winnerTeam, nextTeam]
         : [winnerTeam, loserTeam];
     } else if (rotation === 'winners_out') {
-      // Winning team \u2192 back of queue, losing team stays
+      // Winning team → back of queue, losing team stays
       const nextTeam = newTeamQueue.shift();
       newTeamQueue.push(winnerTeam);
       newTableTeams = nextTeam
@@ -396,7 +398,10 @@ export default function SessionPage() {
           <Trophy className="w-12 h-12 mx-auto text-yellow-500 mb-2" />
           <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Session Complete</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {gameType?.name} &middot; {modeLabel} &middot; {games.length} games{durationStr ? ` \u00B7 ${durationStr}` : ''}
+            {gameType?.name} &middot; {modeLabel} &middot; {games.length} games{durationStr ? ` · ${durationStr}` : ''}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {formatDateTime(session.started_at)}{session.completed_at ? ` — ${formatDateTime(session.completed_at)}` : ''}
           </p>
         </div>
 
@@ -433,7 +438,13 @@ export default function SessionPage() {
                 ) : (
                   <Avatar name={p.name} imageUrl={p.avatarUrl} size="sm" />
                 )}
-                <span className="text-sm font-medium text-gray-900 dark:text-white flex-1">{p.name}</span>
+                {isDoubles && 'team' in p ? (
+                  <span className="text-sm font-medium text-gray-900 dark:text-white flex-1">{p.name}</span>
+                ) : (
+                  <Link href={`/players/${p.id}`} className="text-sm font-medium text-gray-900 dark:text-white flex-1 hover:text-green-600 dark:hover:text-green-400 transition-colors">
+                    {p.name}
+                  </Link>
+                )}
                 <div className="flex items-center gap-2">
                   <TallyMarks count={p.wins} />
                   <span className="text-sm font-bold text-gray-900 dark:text-white w-6 text-right">{p.wins}</span>
@@ -442,6 +453,45 @@ export default function SessionPage() {
             ))}
           </div>
         </Card>
+
+        {/* Game Log */}
+        {games.length > 0 && (
+          <Card className="mb-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 uppercase tracking-wide">Game Log</h3>
+            <div className="space-y-1.5">
+              {games.map((g) => {
+                const winner = profiles.get(g.winner_id);
+                const loserId = g.winner_id === g.player_1_id ? g.player_2_id : g.player_1_id;
+                const loser = profiles.get(loserId);
+                const winnerPartner = g.player_1_partner_id
+                  ? (g.winner_id === g.player_1_id
+                      ? profiles.get(g.player_1_partner_id)
+                      : profiles.get(g.player_2_partner_id || ''))
+                  : null;
+                const loserPartner = g.player_1_partner_id
+                  ? (g.winner_id === g.player_1_id
+                      ? profiles.get(g.player_2_partner_id || '')
+                      : profiles.get(g.player_1_partner_id))
+                  : null;
+                const winnerName = winnerPartner
+                  ? `${winner?.display_name} & ${winnerPartner?.display_name}`
+                  : winner?.display_name;
+                const loserName = loserPartner
+                  ? `${loser?.display_name} & ${loserPartner?.display_name}`
+                  : loser?.display_name;
+                return (
+                  <div key={g.id} className="flex items-center gap-2 py-1 px-2 rounded-lg text-xs">
+                    <span className="text-gray-400 w-5 text-right flex-shrink-0">#{g.game_number}</span>
+                    <span className="text-green-600 dark:text-green-400 font-medium truncate">{winnerName}</span>
+                    <span className="text-gray-400 flex-shrink-0">beat</span>
+                    <span className="text-gray-600 dark:text-gray-400 truncate">{loserName}</span>
+                    <span className="text-gray-400 ml-auto flex-shrink-0">{formatDateTime(g.completed_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         <div className="flex gap-3">
           <Button variant="secondary" className="flex-1" onClick={() => router.push('/')}>
@@ -474,7 +524,7 @@ export default function SessionPage() {
           {gameType?.name} &middot; {modeLabel} &middot; {
             session.rotation_mode === 'king_of_table' ? 'King of the Table'
             : session.rotation_mode === 'round_robin' ? 'Round Robin'
-            : session.rotation_mode === 'winners_out' ? "Winner\u2019s Out"
+            : session.rotation_mode === 'winners_out' ? "Winner’s Out"
             : session.rotation_mode === 'straight_rotation' ? 'Straight Rotation'
             : 'Open Table'
           }
@@ -484,7 +534,7 @@ export default function SessionPage() {
         </div>
       </div>
 
-      {/* Current Table \u2014 Tap to score */}
+      {/* Current Table — Tap to score */}
       {isDoubles && session.table_team_ids ? (
         <div className="grid grid-cols-2 gap-3 mb-4">
           {/* Team 1 */}
@@ -686,9 +736,15 @@ export default function SessionPage() {
                   <Avatar name={p.name} imageUrl={p.avatarUrl} size="sm" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate block">
-                    {p.name}
-                  </span>
+                  {isDoubles && 'team' in p ? (
+                    <span className="text-sm font-medium text-gray-900 dark:text-white truncate block">
+                      {p.name}
+                    </span>
+                  ) : (
+                    <Link href={`/players/${p.id}`} className="text-sm font-medium text-gray-900 dark:text-white truncate block hover:text-green-600 dark:hover:text-green-400 transition-colors">
+                      {p.name}
+                    </Link>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <TallyMarks count={p.wins} />
@@ -699,6 +755,58 @@ export default function SessionPage() {
           })}
         </div>
       </Card>
+
+      {/* Game Log (collapsible) */}
+      {games.length > 0 && (
+        <Card padding="sm" className="mb-4">
+          <button
+            onClick={() => setShowGameLog(!showGameLog)}
+            className="w-full flex items-center justify-between"
+          >
+            <span className="text-xs font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+              Game Log ({games.length})
+            </span>
+            {showGameLog
+              ? <ChevronUp className="w-4 h-4 text-gray-400" />
+              : <ChevronDown className="w-4 h-4 text-gray-400" />
+            }
+          </button>
+          {showGameLog && (
+            <div className="mt-2 space-y-1">
+              {[...games].reverse().map((g) => {
+                const winner = profiles.get(g.winner_id);
+                const loserId = g.winner_id === g.player_1_id ? g.player_2_id : g.player_1_id;
+                const loser = profiles.get(loserId);
+                const winnerPartner = g.player_1_partner_id
+                  ? (g.winner_id === g.player_1_id
+                      ? profiles.get(g.player_1_partner_id)
+                      : profiles.get(g.player_2_partner_id || ''))
+                  : null;
+                const loserPartner = g.player_1_partner_id
+                  ? (g.winner_id === g.player_1_id
+                      ? profiles.get(g.player_2_partner_id || '')
+                      : profiles.get(g.player_1_partner_id))
+                  : null;
+                const winnerName = winnerPartner
+                  ? `${winner?.display_name} & ${winnerPartner?.display_name}`
+                  : winner?.display_name;
+                const loserName = loserPartner
+                  ? `${loser?.display_name} & ${loserPartner?.display_name}`
+                  : loser?.display_name;
+                return (
+                  <div key={g.id} className="flex items-center gap-2 py-0.5 text-xs">
+                    <span className="text-gray-400 w-5 text-right flex-shrink-0">#{g.game_number}</span>
+                    <span className="text-green-600 dark:text-green-400 font-medium truncate">{winnerName}</span>
+                    <span className="text-gray-400 flex-shrink-0">beat</span>
+                    <span className="text-gray-600 dark:text-gray-400 truncate">{loserName}</span>
+                    <span className="text-gray-400 ml-auto flex-shrink-0">{formatDateTime(g.completed_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Controls */}
       <div className="flex gap-2">
@@ -748,7 +856,7 @@ export default function SessionPage() {
             <div className="text-center py-2">
               <div className="text-xs text-gray-500 mb-1">Leader</div>
               <div className="text-sm font-bold text-gray-900 dark:text-white">
-                {leaderboard[0].name} \u2014 {leaderboard[0].wins} wins
+                {leaderboard[0].name} — {leaderboard[0].wins} wins
               </div>
             </div>
           )}

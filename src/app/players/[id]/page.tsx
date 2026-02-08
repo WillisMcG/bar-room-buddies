@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, TrendingUp, TrendingDown, Minus, Zap } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Minus, Zap, Pencil } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Avatar from '@/components/ui/Avatar';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import Modal from '@/components/ui/Modal';
 import { db } from '@/lib/db/dexie';
 import { getWinPercentage, getStreakText, formatDateTime, matchFormatLabel } from '@/lib/utils';
 import type { LocalProfile, LocalMatch, LocalGameType, LocalSessionGame } from '@/lib/db/dexie';
@@ -40,6 +42,8 @@ export default function PlayerProfilePage() {
   const [history, setHistory] = useState<MatchHistoryItem[]>([]);
   const [tab, setTab] = useState<'stats' | 'h2h' | 'history'>('stats');
   const [isLoading, setIsLoading] = useState(true);
+  const [showEditName, setShowEditName] = useState(false);
+  const [editName, setEditName] = useState('');
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -264,6 +268,13 @@ export default function PlayerProfilePage() {
     loadData();
   }, [loadData]);
 
+  const handleEditName = async () => {
+    if (!editName.trim() || !id) return;
+    await db.profiles.update(id, { display_name: editName.trim() });
+    setShowEditName(false);
+    await loadData();
+  };
+
   if (isLoading || !player) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -282,7 +293,15 @@ export default function PlayerProfilePage() {
         {/* Player Header */}
         <Card className="text-center mb-4">
           <Avatar name={player.display_name} imageUrl={player.avatar_url} size="xl" className="mx-auto mb-3" />
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">{player.display_name}</h1>
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">{player.display_name}</h1>
+            <button
+              onClick={() => { setEditName(player.display_name); setShowEditName(true); }}
+              className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          </div>
           <div className="flex items-center justify-center gap-2 mt-1">
             {player.is_local && <Badge>Local</Badge>}
             {player.email && <Badge variant="info">{player.email}</Badge>}
@@ -433,6 +452,24 @@ export default function PlayerProfilePage() {
             )}
           </div>
         )}
+
+        {/* Edit Name Modal */}
+        <Modal isOpen={showEditName} onClose={() => setShowEditName(false)} title="Edit Player Name">
+          <div className="space-y-4">
+            <Input
+              label="Player Name"
+              placeholder="Enter player name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleEditName()}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setShowEditName(false)}>Cancel</Button>
+              <Button variant="primary" className="flex-1" onClick={handleEditName} disabled={!editName.trim()}>Save</Button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </div>
   );
