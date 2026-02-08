@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UserPlus, Check, ArrowRight, Shuffle, Users2 } from 'lucide-react';
+import { UserPlus, Check, ArrowRight, Shuffle, Users2, Dices, Crown, RefreshCw, ArrowDownUp, RotateCcw } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -10,7 +10,7 @@ import Input from '@/components/ui/Input';
 import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId, seedSystemGameTypes } from '@/lib/db/dexie';
-import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import type { LocalProfile, LocalGameType, MatchMode, RotationMode } from '@/lib/db/dexie';
 import { useAuth } from '@/contexts/AuthContext';
 import { shuffleTeams } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,6 +25,7 @@ export default function NewSessionPage() {
   const [players, setPlayers] = useState<LocalProfile[]>([]);
   const [selectedGameType, setSelectedGameType] = useState<string>('');
   const [sessionMode, setSessionMode] = useState<MatchMode>('singles');
+  const [rotationMode, setRotationMode] = useState<RotationMode>('king_of_table');
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
   const [pairedTeams, setPairedTeams] = useState<Array<[string, string]>>([]);
   const [teamPairingSelection, setTeamPairingSelection] = useState<string[]>([]);
@@ -191,6 +192,7 @@ export default function NewSessionPage() {
         id: sessionId,
         game_type_id: selectedGameType,
         session_mode: 'singles',
+        rotation_mode: rotationMode,
         status: 'active',
         started_at: new Date().toISOString(),
         completed_at: null,
@@ -209,6 +211,7 @@ export default function NewSessionPage() {
         id: sessionId,
         game_type_id: selectedGameType,
         session_mode: sessionMode,
+        rotation_mode: rotationMode,
         status: 'active',
         started_at: new Date().toISOString(),
         completed_at: null,
@@ -353,6 +356,35 @@ export default function NewSessionPage() {
               </div>
             )}
           </Card>
+          {/* Rotation Mode Selection */}
+          <Card className="mb-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Table Mode</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { mode: 'king_of_table' as RotationMode, label: 'King of the Table', desc: 'Winner stays, next up challenges', icon: Crown },
+                { mode: 'round_robin' as RotationMode, label: 'Round Robin', desc: 'Both rotate out, next two play', icon: RefreshCw },
+                { mode: 'winners_out' as RotationMode, label: "Winner\u2019s Out", desc: 'Winner leaves, loser stays on', icon: ArrowDownUp },
+                { mode: 'straight_rotation' as RotationMode, label: 'Straight Rotation', desc: 'Both rotate out, fixed order', icon: RotateCcw },
+              ]).map(({ mode, label, desc, icon: Icon }) => (
+                <button
+                  key={mode}
+                  onClick={() => setRotationMode(mode)}
+                  className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                    rotationMode === mode
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={`w-4 h-4 ${rotationMode === mode ? 'text-green-600 dark:text-green-400' : 'text-gray-400'}`} />
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">{label}</div>
+                  </div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400">{desc}</div>
+                </button>
+              ))}
+            </div>
+          </Card>
+
           <Button
             variant="accent"
             size="lg"
@@ -585,7 +617,20 @@ export default function NewSessionPage() {
             <>
               <Card className="mb-4">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Who starts on the table?</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two players to put them on the table first</p>
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Tap two players or pick randomly</p>
+                  <button
+                    onClick={() => {
+                      const ids = Array.from(selectedPlayerIds);
+                      const shuffled = [...ids].sort(() => Math.random() - 0.5);
+                      setTablePlayer1(shuffled[0]);
+                      setTablePlayer2(shuffled[1]);
+                    }}
+                    className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400 hover:underline"
+                  >
+                    <Dices className="w-3.5 h-3.5" /> Random
+                  </button>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className={`p-4 rounded-xl border-2 text-center ${
@@ -678,7 +723,19 @@ export default function NewSessionPage() {
             <>
               <Card className="mb-4">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Which teams start on the table?</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two teams to put them on the table first</p>
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Tap two teams or pick randomly</p>
+                  <button
+                    onClick={() => {
+                      const shuffled = [...pairedTeams].sort(() => Math.random() - 0.5);
+                      setTableTeam1(shuffled[0]);
+                      setTableTeam2(shuffled[1]);
+                    }}
+                    className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400 hover:underline"
+                  >
+                    <Dices className="w-3.5 h-3.5" /> Random
+                  </button>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className={`p-4 rounded-xl border-2 text-center ${

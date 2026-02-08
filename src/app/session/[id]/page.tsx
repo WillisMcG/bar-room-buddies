@@ -24,8 +24,7 @@ function TallyMarks({ count }: { count: number }) {
     <span className="font-mono text-sm tracking-wider text-gray-700 dark:text-gray-300">
       {Array(groups).fill(null).map((_, i) => (
         <span key={`g${i}`} className="mr-1.5 inline-block relative">
-          <span>||||
-                  </span>
+          <span>||||</span>
           <span className="absolute inset-0 flex items-center justify-center text-green-600 dark:text-green-400 font-bold">/</span>
         </span>
       ))}
@@ -147,6 +146,7 @@ export default function SessionPage() {
     const [p1, p2] = session.table_player_ids;
     const loserId = winnerId === p1 ? p2 : p1;
     const nextGameNumber = games.length + 1;
+    const rotation = session.rotation_mode || 'king_of_table';
 
     // Record the game with undo snapshot
     const newGame: LocalSessionGame = {
@@ -167,14 +167,32 @@ export default function SessionPage() {
     };
     await db.sessionGames.add(newGame);
 
-    // Rotate: winner stays, loser → back of queue, next from queue → table
     const newQueue = [...session.waiting_queue];
-    const nextPlayer = newQueue.shift(); // Take from front of queue
-    newQueue.push(loserId);              // Loser goes to back
+    let newTablePlayers: [string, string];
 
-    const newTablePlayers: [string, string] = nextPlayer
-      ? [winnerId, nextPlayer]
-      : [winnerId, loserId]; // Edge case: no one in queue
+    if (rotation === 'king_of_table') {
+      // Winner stays, loser \u2192 back of queue, next from queue \u2192 table
+      const nextPlayer = newQueue.shift();
+      newQueue.push(loserId);
+      newTablePlayers = nextPlayer
+        ? [winnerId, nextPlayer]
+        : [winnerId, loserId];
+    } else if (rotation === 'winners_out') {
+      // Winner \u2192 back of queue, loser stays, next from queue plays loser
+      const nextPlayer = newQueue.shift();
+      newQueue.push(winnerId);
+      newTablePlayers = nextPlayer
+        ? [loserId, nextPlayer]
+        : [loserId, winnerId];
+    } else {
+      // round_robin / straight_rotation: both rotate out, next 2 from queue
+      const next1 = newQueue.shift();
+      const next2 = newQueue.shift();
+      newQueue.push(p1, p2);
+      newTablePlayers = (next1 && next2)
+        ? [next1, next2]
+        : [p1, p2]; // Edge case: not enough in queue
+    }
 
     await db.sessions.update(sessionId, {
       table_player_ids: newTablePlayers,
@@ -192,6 +210,7 @@ export default function SessionPage() {
     const winnerTeam = session.table_team_ids[winnerTeamIndex];
     const loserTeam = session.table_team_ids[winnerTeamIndex === 0 ? 1 : 0];
     const nextGameNumber = games.length + 1;
+    const rotation = session.rotation_mode || 'king_of_table';
 
     // Record the game with undo snapshot
     const newGame: LocalSessionGame = {
@@ -212,14 +231,32 @@ export default function SessionPage() {
     };
     await db.sessionGames.add(newGame);
 
-    // Rotate: winning team stays, losing team → back of queue, next from queue → table
     const newTeamQueue = [...session.waiting_team_queue];
-    const nextTeam = newTeamQueue.shift(); // Take from front of queue
-    newTeamQueue.push(loserTeam);          // Losing team goes to back
+    let newTableTeams: [[string, string], [string, string]];
 
-    const newTableTeams: [[string, string], [string, string]] = nextTeam
-      ? [winnerTeam, nextTeam]
-      : [winnerTeam, loserTeam]; // Edge case: no one in queue
+    if (rotation === 'king_of_table') {
+      // Winning team stays, losing team \u2192 back of queue
+      const nextTeam = newTeamQueue.shift();
+      newTeamQueue.push(loserTeam);
+      newTableTeams = nextTeam
+        ? [winnerTeam, nextTeam]
+        : [winnerTeam, loserTeam];
+    } else if (rotation === 'winners_out') {
+      // Winning team \u2192 back of queue, losing team stays
+      const nextTeam = newTeamQueue.shift();
+      newTeamQueue.push(winnerTeam);
+      newTableTeams = nextTeam
+        ? [loserTeam, nextTeam]
+        : [loserTeam, winnerTeam];
+    } else {
+      // round_robin / straight_rotation: both teams rotate out
+      const next1 = newTeamQueue.shift();
+      const next2 = newTeamQueue.shift();
+      newTeamQueue.push(winnerTeam, loserTeam);
+      newTableTeams = (next1 && next2)
+        ? [next1, next2]
+        : [winnerTeam, loserTeam];
+    }
 
     await db.sessions.update(sessionId, {
       table_team_ids: newTableTeams,
@@ -359,7 +396,7 @@ export default function SessionPage() {
           <Trophy className="w-12 h-12 mx-auto text-yellow-500 mb-2" />
           <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Session Complete</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {gameType?.name} &middot; {modeLabel} &middot; {games.length} games{durationStr ? ` · ${durationStr}` : ''}
+            {gameType?.name} &middot; {modeLabel} &middot; {games.length} games{durationStr ? ` \u00B7 ${durationStr}` : ''}
           </p>
         </div>
 
@@ -434,14 +471,20 @@ export default function SessionPage() {
       {/* Header */}
       <div className="text-center py-3">
         <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-          {gameType?.name} &middot; {modeLabel} &middot; Open Table
+          {gameType?.name} &middot; {modeLabel} &middot; {
+            session.rotation_mode === 'king_of_table' ? 'King of the Table'
+            : session.rotation_mode === 'round_robin' ? 'Round Robin'
+            : session.rotation_mode === 'winners_out' ? "Winner\u2019s Out"
+            : session.rotation_mode === 'straight_rotation' ? 'Straight Rotation'
+            : 'Open Table'
+          }
         </div>
         <div className="text-xs text-gray-400 mt-0.5">
           Game #{games.length + 1} &middot; {participantCount} players
         </div>
       </div>
 
-      {/* Current Table — Tap to score */}
+      {/* Current Table \u2014 Tap to score */}
       {isDoubles && session.table_team_ids ? (
         <div className="grid grid-cols-2 gap-3 mb-4">
           {/* Team 1 */}
@@ -705,7 +748,7 @@ export default function SessionPage() {
             <div className="text-center py-2">
               <div className="text-xs text-gray-500 mb-1">Leader</div>
               <div className="text-sm font-bold text-gray-900 dark:text-white">
-                {leaderboard[0].name} — {leaderboard[0].wins} wins
+                {leaderboard[0].name} \u2014 {leaderboard[0].wins} wins
               </div>
             </div>
           )}

@@ -29,6 +29,7 @@ export interface LocalGameType {
 }
 
 export type MatchMode = 'singles' | 'doubles' | 'scotch_doubles';
+export type RotationMode = 'king_of_table' | 'round_robin' | 'winners_out' | 'straight_rotation';
 
 export interface LocalMatch {
   id: string;
@@ -75,6 +76,7 @@ export interface LocalSession {
   id: string;
   game_type_id: string;
   session_mode: MatchMode;
+  rotation_mode: RotationMode;
   status: 'active' | 'completed';
   started_at: string;
   completed_at: string | null;
@@ -288,6 +290,26 @@ class BarRoomBuddiesDB extends Dexie {
       // Set venue_id to null for existing profiles
       tx.table('profiles').toCollection().modify(profile => {
         if (profile.venue_id === undefined) profile.venue_id = null;
+      });
+    });
+
+    // v6: Add rotation_mode to sessions
+    this.version(6).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, venue_id, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, match_mode, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, session_mode, rotation_mode, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
+      tournaments: 'id, game_type_id, format, match_mode, status, started_at, venue_id, synced',
+      tournamentParticipants: 'id, tournament_id, player_id, seed_position, status, synced',
+      tournamentMatches: 'id, tournament_id, round_number, bracket_type, status, winner_id, synced',
+      tournamentGames: 'id, tournament_match_id, game_number, winner_id, synced',
+    }).upgrade(tx => {
+      tx.table('sessions').toCollection().modify(session => {
+        if (!session.rotation_mode) session.rotation_mode = 'king_of_table';
       });
     });
   }
