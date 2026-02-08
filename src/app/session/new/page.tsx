@@ -13,6 +13,7 @@ import { db, getDeviceId, seedSystemGameTypes } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode, RotationMode } from '@/lib/db/dexie';
 import { useAuth } from '@/contexts/AuthContext';
 import { shuffleTeams } from '@/lib/utils';
+import { findOrCreateTeam } from '@/lib/team-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 type Step = 'game_type' | 'players' | 'team_pairing' | 'table_setup';
@@ -207,6 +208,11 @@ export default function NewSessionPage() {
         local_updated_at: new Date().toISOString(),
       });
     } else {
+      // Create persistent team records for all paired teams
+      await Promise.all(
+        pairedTeams.map(team => findOrCreateTeam(team[0], team[1], venueId))
+      );
+
       await db.sessions.add({
         id: sessionId,
         game_type_id: selectedGameType,
@@ -360,12 +366,14 @@ export default function NewSessionPage() {
           <Card className="mb-4">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Table Mode</h3>
             <div className="grid grid-cols-2 gap-2">
-              {([
-                { mode: 'king_of_table' as RotationMode, label: 'King of the Table', desc: 'Winner stays, next up challenges', icon: Crown },
-                { mode: 'round_robin' as RotationMode, label: 'Round Robin', desc: 'Both rotate out, next two play', icon: RefreshCw },
-                { mode: 'winners_out' as RotationMode, label: "Winner's Out", desc: 'Winner leaves, loser stays on', icon: ArrowDownUp },
-                { mode: 'straight_rotation' as RotationMode, label: 'Straight Rotation', desc: 'Both rotate out, fixed order', icon: RotateCcw },
-              ]).map(({ mode, label, desc, icon: Icon }) => (
+              {(
+                [
+                  { mode: 'king_of_table' as RotationMode, label: 'King of the Table', desc: 'Winner stays, next up challenges', icon: Crown },
+                  { mode: 'round_robin' as RotationMode, label: 'Round Robin', desc: 'Both rotate out, next two play', icon: RefreshCw },
+                  { mode: 'winners_out' as RotationMode, label: "Winner's Out", desc: 'Winner leaves, loser stays on', icon: ArrowDownUp },
+                  { mode: 'straight_rotation' as RotationMode, label: 'Straight Rotation', desc: 'Both rotate out, fixed order', icon: RotateCcw },
+                ]
+              ).map(({ mode, label, desc, icon: Icon }) => (
                 <button
                   key={mode}
                   onClick={() => setRotationMode(mode)}
