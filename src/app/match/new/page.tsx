@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Plus, UserPlus } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
@@ -11,16 +11,32 @@ import Select from '@/components/ui/Select';
 import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId } from '@/lib/db/dexie';
-import type { LocalProfile, LocalGameType } from '@/lib/db/dexie';
+import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 
+type DoublesType = 'doubles' | 'scotch_doubles';
+
 export default function NewMatchPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500" /></div>}>
+      <NewMatchContent />
+    </Suspense>
+  );
+}
+
+function NewMatchContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isDoublesMode = searchParams.get('mode') === 'doubles';
+
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
   const [players, setPlayers] = useState<LocalProfile[]>([]);
   const [selectedGameType, setSelectedGameType] = useState<string>('');
   const [selectedPlayer1, setSelectedPlayer1] = useState<string>('');
   const [selectedPlayer2, setSelectedPlayer2] = useState<string>('');
+  const [selectedPlayer1Partner, setSelectedPlayer1Partner] = useState<string>('');
+  const [selectedPlayer2Partner, setSelectedPlayer2Partner] = useState<string>('');
+  const [doublesType, setDoublesType] = useState<DoublesType>('doubles');
   const [format, setFormat] = useState<string>('race_to');
   const [formatTarget, setFormatTarget] = useState<number>(5);
   const [showNewPlayer, setShowNewPlayer] = useState(false);
@@ -81,16 +97,27 @@ export default function NewMatchPage() {
   };
 
   const handleStartMatch = async () => {
-    if (!selectedGameType || !selectedPlayer1 || !selectedPlayer2) return;
-    if (selectedPlayer1 === selectedPlayer2) return;
+    if (isDoublesMode) {
+      if (!selectedGameType || !selectedPlayer1 || !selectedPlayer2 || !selectedPlayer1Partner || !selectedPlayer2Partner) return;
+      const uniquePlayers = new Set([selectedPlayer1, selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner]);
+      if (uniquePlayers.size !== 4) return;
+    } else {
+      if (!selectedGameType || !selectedPlayer1 || !selectedPlayer2) return;
+      if (selectedPlayer1 === selectedPlayer2) return;
+    }
     setIsCreating(true);
 
     const matchId = uuidv4();
+    const matchMode: MatchMode = isDoublesMode ? doublesType : 'singles';
+
     await db.matches.add({
       id: matchId,
       game_type_id: selectedGameType,
+      match_mode: matchMode,
       player_1_id: selectedPlayer1,
       player_2_id: selectedPlayer2,
+      player_1_partner_id: isDoublesMode ? selectedPlayer1Partner : null,
+      player_2_partner_id: isDoublesMode ? selectedPlayer2Partner : null,
       format: format as any,
       format_target: format === 'single' ? null : formatTarget,
       player_1_score: 0,
@@ -107,10 +134,40 @@ export default function NewMatchPage() {
     router.push(`/match/${matchId}`);
   };
 
-  const canStart = selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1 !== selectedPlayer2;
+  const canStart = isDoublesMode
+    ? selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1Partner && selectedPlayer2Partner &&
+      new Set([selectedPlayer1, selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner]).size === 4
+    : selectedGameType && selectedPlayer1 && selectedPlayer2 && selectedPlayer1 !== selectedPlayer2;
+
+  const pageTitle = isDoublesMode ? 'New Doubles Match' : 'New Match';
 
   return (
-    <PageWrapper title="New Match" subtitle="Set up your game">
+    <PageWrapper title={pageTitle} subtitle="Set up your game">
+      {/* Doubles Type Toggle */}
+      {isDoublesMode && (
+        <Card className="mb-4">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Doubles Format</h3>
+          <div className="flex gap-2">
+            {[
+              { value: 'doubles' as DoublesType, label: 'Straight Doubles' },
+              { value: 'scotch_doubles' as DoublesType, label: 'Scotch Doubles' },
+            ].map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setDoublesType(option.value)}
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                  doublesType === option.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Game Type */}
       <Card className="mb-4">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Game Type</h3>
@@ -205,7 +262,9 @@ export default function NewMatchPage() {
               <UserPlus className="w-8 h-8 text-gray-400 dark:text-gray-500" />
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">No players yet</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">Add at least two players to start a match</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+              {isDoublesMode ? 'Add at least four players to start a doubles match' : 'Add at least two players to start a match'}
+            </p>
             <Button
               variant="primary"
               onClick={() => setShowNewPlayer(true)}
@@ -214,7 +273,134 @@ export default function NewMatchPage() {
               <UserPlus className="w-4 h-4 mr-2" /> Add Your First Player
             </Button>
           </div>
+        ) : isDoublesMode ? (
+          // Doubles mode UI
+          <div className="space-y-4">
+            {/* Team 1 */}
+            <div>
+              <label className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-2 block">Team 1</label>
+              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar">
+                {/* Player 1A */}
+                <div className="col-span-2">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 1A</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {players.map((p) => (
+                      <button
+                        key={`p1a-${p.id}`}
+                        onClick={() => setSelectedPlayer1(p.id)}
+                        disabled={[selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                          selectedPlayer1 === p.id
+                            ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
+                            : [selectedPlayer2, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)
+                            ? 'opacity-30 cursor-not-allowed'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                          {p.display_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Player 1B */}
+                <div className="col-span-2">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 1B</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {players.map((p) => (
+                      <button
+                        key={`p1b-${p.id}`}
+                        onClick={() => setSelectedPlayer1Partner(p.id)}
+                        disabled={[selectedPlayer1, selectedPlayer2, selectedPlayer2Partner].includes(p.id)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                          selectedPlayer1Partner === p.id
+                            ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
+                            : [selectedPlayer1, selectedPlayer2, selectedPlayer2Partner].includes(p.id)
+                            ? 'opacity-30 cursor-not-allowed'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                          {p.display_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* VS Divider */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+              <span className="text-xs font-bold text-gray-400">VS</span>
+              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+            </div>
+
+            {/* Team 2 */}
+            <div>
+              <label className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2 block">Team 2</label>
+              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar">
+                {/* Player 2A */}
+                <div className="col-span-2">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 2A</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {players.map((p) => (
+                      <button
+                        key={`p2a-${p.id}`}
+                        onClick={() => setSelectedPlayer2(p.id)}
+                        disabled={[selectedPlayer1, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                          selectedPlayer2 === p.id
+                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
+                            : [selectedPlayer1, selectedPlayer1Partner, selectedPlayer2Partner].includes(p.id)
+                            ? 'opacity-30 cursor-not-allowed'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                          {p.display_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Player 2B */}
+                <div className="col-span-2">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Player 2B</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {players.map((p) => (
+                      <button
+                        key={`p2b-${p.id}`}
+                        onClick={() => setSelectedPlayer2Partner(p.id)}
+                        disabled={[selectedPlayer1, selectedPlayer1Partner, selectedPlayer2].includes(p.id)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
+                          selectedPlayer2Partner === p.id
+                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
+                            : [selectedPlayer1, selectedPlayer1Partner, selectedPlayer2].includes(p.id)
+                            ? 'opacity-30 cursor-not-allowed'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
+                          {p.display_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : players.length === 1 ? (
+          // Singles mode: only 1 player available
           <div className="space-y-3">
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
@@ -245,6 +431,7 @@ export default function NewMatchPage() {
             </div>
           </div>
         ) : (
+          // Singles mode: 2+ players available
           <div className="space-y-3">
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
@@ -313,7 +500,7 @@ export default function NewMatchPage() {
         disabled={!canStart || isCreating}
         onClick={handleStartMatch}
       >
-        {isCreating ? 'Starting...' : 'Start Match'}
+        {isCreating ? 'Starting...' : isDoublesMode ? 'Start Doubles Match' : 'Start Match'}
       </Button>
 
       {/* New Player Modal */}
