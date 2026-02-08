@@ -30,7 +30,7 @@ export default function NewMatchPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      // Seed system game types if they don't exist yet (handles first visit to this page)
+      // Ensure system game types are seeded (uses singleton promise, safe to call multiple times)
       const { seedSystemGameTypes } = await import('@/lib/db/dexie');
       await seedSystemGameTypes();
 

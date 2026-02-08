@@ -109,14 +109,40 @@ export function getDeviceId(): string {
   return deviceId;
 }
 
-export async function seedSystemGameTypes() {
-  // Check if any system game types already exist (use toArray + filter since
-  // Dexie doesn't reliably query booleans with .equals())
-  const allTypes = await db.gameTypes.toArray();
-  const existingSystem = allTypes.filter(t => t.is_system);
-  if (existingSystem.length > 0) return;
+// Singleton promise to prevent race conditions when multiple components
+// call seedSystemGameTypes() simultaneously
+let _seedPromise: Promise<void> | null = null;
 
-  const systemTypes: LocalGameType[] = [
+export function seedSystemGameTypes(): Promise<void> {
+  if (!_seedPromise) {
+    _seedPromise = _doSeedSystemGameTypes();
+  }
+  return _seedPromise;
+}
+
+async function _doSeedSystemGameTypes() {
+  // First, deduplicate any existing system types (cleanup from race conditions)
+  const allTypes = await db.gameTypes.toArray();
+  const systemTypes = allTypes.filter(t => t.is_system);
+
+  // Remove duplicates: keep only the first of each name
+  const seen = new Set<string>();
+  const toDelete: string[] = [];
+  for (const t of systemTypes) {
+    if (seen.has(t.name)) {
+      toDelete.push(t.id);
+    } else {
+      seen.add(t.name);
+    }
+  }
+  if (toDelete.length > 0) {
+    await db.gameTypes.bulkDelete(toDelete);
+  }
+
+  // Check which system types are missing and only add those
+  const existingNames = new Set(systemTypes.map(t => t.name));
+
+  const requiredTypes: LocalGameType[] = [
     {
       id: crypto.randomUUID(),
       name: '8-Ball',
@@ -163,5 +189,8 @@ export async function seedSystemGameTypes() {
     },
   ];
 
-  await db.gameTypes.bulkAdd(systemTypes);
+  const missing = requiredTypes.filter(t => !existingNames.has(t.name));
+  if (missing.length > 0) {
+    await db.gameTypes.bulkAdd(missing);
+  }
 }
