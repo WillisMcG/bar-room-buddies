@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Target, Users } from 'lucide-react';
+import { Target, Users, UsersRound } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 
@@ -19,6 +19,22 @@ export default function PlayPage() {
                 <h3 className="text-base font-semibold text-gray-900 dark:text-white">1v1 Match</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                   Two players, set format (race to, best of, or single game)
+                </p>
+              </div>
+            </div>
+          </Card>
+        </Link>
+
+        <Link href="/match/new?mode=doubles">
+          <Card padding="md" className="hover:border-green-500 transition-colors cursor-pointer">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
+                <UsersRound className="w-7 h-7 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">Doubles</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  2v2 teams — straight doubles or scotch doubles
                 </p>
               </div>
             </div>

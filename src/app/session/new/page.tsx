@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UserPlus, Check, ArrowRight } from 'lucide-react';
+import { UserPlus, Check, ArrowRight, Users2 } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -10,10 +10,10 @@ import Input from '@/components/ui/Input';
 import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId, seedSystemGameTypes } from '@/lib/db/dexie';
-import type { LocalProfile, LocalGameType } from '@/lib/db/dexie';
+import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
 import { v4 as uuidv4 } from 'uuid';
 
-type Step = 'game_type' | 'players' | 'table_setup';
+type Step = 'game_type' | 'players' | 'team_pairing' | 'table_setup';
 
 export default function NewSessionPage() {
   const router = useRouter();
@@ -21,9 +21,14 @@ export default function NewSessionPage() {
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
   const [players, setPlayers] = useState<LocalProfile[]>([]);
   const [selectedGameType, setSelectedGameType] = useState<string>('');
+  const [sessionMode, setSessionMode] = useState<MatchMode>('singles');
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
+  const [pairedTeams, setPairedTeams] = useState<Array<[string, string]>>([]);
+  const [teamPairingSelection, setTeamPairingSelection] = useState<string[]>([]);
   const [tablePlayer1, setTablePlayer1] = useState<string>('');
   const [tablePlayer2, setTablePlayer2] = useState<string>('');
+  const [tableTeam1, setTableTeam1] = useState<[string, string] | null>(null);
+  const [tableTeam2, setTableTeam2] = useState<[string, string] | null>(null);
   const [showNewPlayer, setShowNewPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -52,11 +57,52 @@ export default function NewSessionPage() {
         // Clean up table selections if removed
         if (tablePlayer1 === id) setTablePlayer1('');
         if (tablePlayer2 === id) setTablePlayer2('');
+        // Clean up team selections if removed
+        setTableTeam1(prev => prev && (prev[0] === id || prev[1] === id) ? null : prev);
+        setTableTeam2(prev => prev && (prev[0] === id || prev[1] === id) ? null : prev);
       } else {
         next.add(id);
       }
       return next;
     });
+  };
+
+  const toggleTeamPairingSelection = (id: string) => {
+    setTeamPairingSelection(prev => {
+      const next = [...prev];
+      const index = next.indexOf(id);
+      if (index > -1) {
+        next.splice(index, 1);
+      } else {
+        if (next.length < 2) {
+          next.push(id);
+        } else {
+          next[1] = id;
+        }
+      }
+      return next;
+    });
+  };
+
+  const confirmTeamPairing = () => {
+    if (teamPairingSelection.length === 2) {
+      const newTeam: [string, string] = [teamPairingSelection[0], teamPairingSelection[1]];
+      setPairedTeams(prev => [...prev, newTeam]);
+      setTeamPairingSelection([]);
+    }
+  };
+
+  const removeTeamPairing = (index: number) => {
+    setPairedTeams(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const allPlayersTeamed = (): boolean => {
+    const teamed = new Set<string>();
+    pairedTeams.forEach(([p1, p2]) => {
+      teamed.add(p1);
+      teamed.add(p2);
+    });
+    return selectedPlayerIds.size === teamed.size;
   };
 
   const handleAddPlayer = async () => {
@@ -89,26 +135,65 @@ export default function NewSessionPage() {
     p => p.id !== tablePlayer1 && p.id !== tablePlayer2
   );
 
+  const waitingTeams = pairedTeams.filter(
+    team => tableTeam1 !== team && tableTeam2 !== team
+  );
+
   const handleStartSession = async () => {
-    if (!selectedGameType || !tablePlayer1 || !tablePlayer2 || selectedPlayerIds.size < 3) return;
     setIsCreating(true);
 
-    const sessionId = uuidv4();
-    const queue = waitingPlayers.map(p => p.id);
+    if (sessionMode === 'singles') {
+      if (!selectedGameType || !tablePlayer1 || !tablePlayer2 || selectedPlayerIds.size < 3) {
+        setIsCreating(false);
+        return;
+      }
+    } else {
+      if (!selectedGameType || !tableTeam1 || !tableTeam2 || selectedPlayerIds.size < 4 || !allPlayersTeamed()) {
+        setIsCreating(false);
+        return;
+      }
+    }
 
-    await db.sessions.add({
-      id: sessionId,
-      game_type_id: selectedGameType,
-      status: 'active',
-      started_at: new Date().toISOString(),
-      completed_at: null,
-      participant_ids: Array.from(selectedPlayerIds),
-      table_player_ids: [tablePlayer1, tablePlayer2],
-      waiting_queue: queue,
-      venue_id: null,
-      synced: false,
-      local_updated_at: new Date().toISOString(),
-    });
+    const sessionId = uuidv4();
+
+    if (sessionMode === 'singles') {
+      const queue = waitingPlayers.map(p => p.id);
+      await db.sessions.add({
+        id: sessionId,
+        game_type_id: selectedGameType,
+        session_mode: 'singles',
+        status: 'active',
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        participant_ids: Array.from(selectedPlayerIds),
+        table_player_ids: [tablePlayer1, tablePlayer2],
+        waiting_queue: queue,
+        teams: [],
+        table_team_ids: null,
+        waiting_team_queue: [],
+        venue_id: null,
+        synced: false,
+        local_updated_at: new Date().toISOString(),
+      });
+    } else {
+      await db.sessions.add({
+        id: sessionId,
+        game_type_id: selectedGameType,
+        session_mode: sessionMode,
+        status: 'active',
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        participant_ids: Array.from(selectedPlayerIds),
+        table_player_ids: ['', ''],
+        waiting_queue: [],
+        teams: pairedTeams,
+        table_team_ids: [tableTeam1!, tableTeam2!],
+        waiting_team_queue: waitingTeams,
+        venue_id: null,
+        synced: false,
+        local_updated_at: new Date().toISOString(),
+      });
+    }
 
     router.push(`/session/${sessionId}`);
   };
@@ -129,18 +214,48 @@ export default function NewSessionPage() {
     }
   };
 
+  const selectTableTeam = (team: [string, string]) => {
+    if (!tableTeam1) {
+      setTableTeam1(team);
+    } else if (!tableTeam2 && team !== tableTeam1) {
+      setTableTeam2(team);
+    } else if (team === tableTeam1) {
+      setTableTeam1(tableTeam2);
+      setTableTeam2(null);
+    } else if (team === tableTeam2) {
+      setTableTeam2(null);
+    } else {
+      // Both slots full, replace team 2
+      setTableTeam2(team);
+    }
+  };
+
+  const getStepIndicators = (): Step[] => {
+    if (sessionMode === 'singles') {
+      return ['game_type', 'players', 'table_setup'];
+    } else {
+      return ['game_type', 'players', 'team_pairing', 'table_setup'];
+    }
+  };
+
+  const steps = getStepIndicators();
+
   return (
     <PageWrapper title="Open Table" subtitle="Set up a group session">
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-4">
-        {(['game_type', 'players', 'table_setup'] as Step[]).map((s, i) => (
+        {steps.map((s, i) => (
           <div key={s} className="flex items-center gap-2">
             {i > 0 && <ArrowRight className="w-3 h-3 text-gray-400" />}
             <button
               onClick={() => {
                 if (s === 'game_type') setStep(s);
                 if (s === 'players' && selectedGameType) setStep(s);
-                if (s === 'table_setup' && selectedPlayerIds.size >= 3) setStep(s);
+                if (s === 'team_pairing' && selectedPlayerIds.size >= 4 && sessionMode !== 'singles') setStep(s);
+                if (s === 'table_setup') {
+                  if (sessionMode === 'singles' && selectedPlayerIds.size >= 3) setStep(s);
+                  if (sessionMode !== 'singles' && allPlayersTeamed()) setStep(s);
+                }
               }}
               className={`text-xs font-medium px-2 py-1 rounded-full transition-colors ${
                 step === s
@@ -148,7 +263,7 @@ export default function NewSessionPage() {
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
               }`}
             >
-              {s === 'game_type' ? 'Game' : s === 'players' ? 'Players' : 'Table'}
+              {s === 'game_type' ? 'Game' : s === 'players' ? 'Players' : s === 'team_pairing' ? 'Teams' : 'Table'}
             </button>
           </div>
         ))}
@@ -157,6 +272,36 @@ export default function NewSessionPage() {
       {/* Step 1: Game Type */}
       {step === 'game_type' && (
         <>
+          {/* Session Mode Toggle */}
+          <Card className="mb-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Session Mode</h3>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {(['singles', 'doubles', 'scotch_doubles'] as MatchMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setSessionMode(mode);
+                    // Reset team-related state when changing mode
+                    setPairedTeams([]);
+                    setTeamPairingSelection([]);
+                    setTableTeam1(null);
+                    setTableTeam2(null);
+                  }}
+                  className={`p-3 rounded-lg border-2 text-center transition-colors ${
+                    sessionMode === mode
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  }`}
+                >
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {mode === 'singles' ? 'Singles' : mode === 'doubles' ? 'Doubles' : 'Scotch Doubles'}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          {/* Game Type Selection */}
           <Card className="mb-4">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Game Type</h3>
             {isLoading ? (
@@ -206,10 +351,25 @@ export default function NewSessionPage() {
                 <UserPlus className="w-3.5 h-3.5" /> Add New
               </button>
             </div>
-            {selectedPlayerIds.size < 3 && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
-                Select at least 3 players to start a group session
-              </p>
+            {sessionMode === 'singles' ? (
+              selectedPlayerIds.size < 3 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+                  Select at least 3 players to start a group session
+                </p>
+              )
+            ) : (
+              <>
+                {selectedPlayerIds.size < 4 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+                    Select at least 4 players for doubles
+                  </p>
+                )}
+                {selectedPlayerIds.size % 2 !== 0 && selectedPlayerIds.size >= 4 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+                    Select an even number of players for team pairing
+                  </p>
+                )}
+              </>
             )}
             {players.length === 0 ? (
               <div className="text-center py-6">
@@ -252,7 +412,114 @@ export default function NewSessionPage() {
             variant="accent"
             size="lg"
             className="w-full"
-            disabled={selectedPlayerIds.size < 3}
+            disabled={
+              sessionMode === 'singles'
+                ? selectedPlayerIds.size < 3
+                : selectedPlayerIds.size < 4 || selectedPlayerIds.size % 2 !== 0
+            }
+            onClick={() => setStep(sessionMode === 'singles' ? 'table_setup' : 'team_pairing')}
+          >
+            Next: {sessionMode === 'singles' ? 'Set Up Table' : 'Pair Teams'}
+          </Button>
+        </>
+      )}
+
+      {/* Step 3: Team Pairing (doubles only) */}
+      {step === 'team_pairing' && sessionMode !== 'singles' && (
+        <>
+          <Card className="mb-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Pair Teams</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two players to pair them as a team</p>
+
+            {pairedTeams.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {pairedTeams.map((team, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-lg border-2 flex items-center justify-between ${
+                      ['bg-blue-50 dark:bg-blue-900/20 border-blue-500',
+                       'bg-purple-50 dark:bg-purple-900/20 border-purple-500',
+                       'bg-pink-50 dark:bg-pink-900/20 border-pink-500',
+                       'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500'][idx % 4]
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Avatar
+                        name={players.find(p => p.id === team[0])?.display_name || ''}
+                        imageUrl={players.find(p => p.id === team[0])?.avatar_url}
+                        size="sm"
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {players.find(p => p.id === team[0])?.display_name}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">&</span>
+                      <Avatar
+                        name={players.find(p => p.id === team[1])?.display_name || ''}
+                        imageUrl={players.find(p => p.id === team[1])?.avatar_url}
+                        size="sm"
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {players.find(p => p.id === team[1])?.display_name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => removeTeamPairing(idx)}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!allPlayersTeamed() && (
+              <div className="space-y-2 mb-4">
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Select 2 players to form a team ({pairedTeams.length * 2} / {selectedPlayerIds.size} paired)
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {selectedPlayers.map((p) => {
+                    const isTeamed = pairedTeams.some(team => team[0] === p.id || team[1] === p.id);
+                    const isSelected = teamPairingSelection.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        disabled={isTeamed}
+                        onClick={() => toggleTeamPairingSelection(p.id)}
+                        className={`p-3 rounded-lg border-2 transition-colors ${
+                          isTeamed
+                            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
+                            : isSelected
+                            ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        }`}
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                          <span className="text-xs text-gray-700 dark:text-gray-300 truncate">
+                            {p.display_name}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {allPlayersTeamed() && (
+              <p className="text-xs text-green-600 dark:text-green-400 mb-3">
+                All players paired! Ready to select table teams.
+              </p>
+            )}
+          </Card>
+
+          <Button
+            variant="accent"
+            size="lg"
+            className="w-full"
+            disabled={!allPlayersTeamed()}
             onClick={() => setStep('table_setup')}
           >
             Next: Set Up Table
@@ -260,105 +527,230 @@ export default function NewSessionPage() {
         </>
       )}
 
-      {/* Step 3: Table Setup */}
+      {/* Step 4: Table Setup */}
       {step === 'table_setup' && (
         <>
-          <Card className="mb-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Who starts on the table?</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two players to put them on the table first</p>
+          {sessionMode === 'singles' ? (
+            <>
+              <Card className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Who starts on the table?</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two players to put them on the table first</p>
 
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className={`p-4 rounded-xl border-2 text-center ${
-                tablePlayer1 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
-              }`}>
-                {tablePlayer1 ? (
-                  <>
-                    <Avatar
-                      name={players.find(p => p.id === tablePlayer1)?.display_name || ''}
-                      imageUrl={players.find(p => p.id === tablePlayer1)?.avatar_url}
-                      size="lg"
-                      className="mx-auto mb-1"
-                    />
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">
-                      {players.find(p => p.id === tablePlayer1)?.display_name}
-                    </div>
-                  </>
-                ) : (
-                  <div className="py-4 text-sm text-gray-400">Player 1</div>
-                )}
-              </div>
-              <div className={`p-4 rounded-xl border-2 text-center ${
-                tablePlayer2 ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
-              }`}>
-                {tablePlayer2 ? (
-                  <>
-                    <Avatar
-                      name={players.find(p => p.id === tablePlayer2)?.display_name || ''}
-                      imageUrl={players.find(p => p.id === tablePlayer2)?.avatar_url}
-                      size="lg"
-                      className="mx-auto mb-1"
-                    />
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">
-                      {players.find(p => p.id === tablePlayer2)?.display_name}
-                    </div>
-                  </>
-                ) : (
-                  <div className="py-4 text-sm text-gray-400">Player 2</div>
-                )}
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className={`p-4 rounded-xl border-2 text-center ${
+                    tablePlayer1 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {tablePlayer1 ? (
+                      <>
+                        <Avatar
+                          name={players.find(p => p.id === tablePlayer1)?.display_name || ''}
+                          imageUrl={players.find(p => p.id === tablePlayer1)?.avatar_url}
+                          size="lg"
+                          className="mx-auto mb-1"
+                        />
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === tablePlayer1)?.display_name}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-gray-400">Player 1</div>
+                    )}
+                  </div>
+                  <div className={`p-4 rounded-xl border-2 text-center ${
+                    tablePlayer2 ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {tablePlayer2 ? (
+                      <>
+                        <Avatar
+                          name={players.find(p => p.id === tablePlayer2)?.display_name || ''}
+                          imageUrl={players.find(p => p.id === tablePlayer2)?.avatar_url}
+                          size="lg"
+                          className="mx-auto mb-1"
+                        />
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === tablePlayer2)?.display_name}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-gray-400">Player 2</div>
+                    )}
+                  </div>
+                </div>
 
-            <div className="space-y-2">
-              {selectedPlayers.map((p) => {
-                const isOnTable = p.id === tablePlayer1 || p.id === tablePlayer2;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => selectTablePlayer(p.id)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-colors ${
-                      isOnTable
-                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-transparent'
-                    }`}
-                  >
-                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                    <span className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-left">
-                      {p.display_name}
-                    </span>
-                    {p.id === tablePlayer1 && (
-                      <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">On Table</span>
-                    )}
-                    {p.id === tablePlayer2 && (
-                      <span className="text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">On Table</span>
-                    )}
-                    {!isOnTable && (
-                      <span className="text-xs text-gray-400">Waiting</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </Card>
+                <div className="space-y-2">
+                  {selectedPlayers.map((p) => {
+                    const isOnTable = p.id === tablePlayer1 || p.id === tablePlayer2;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => selectTablePlayer(p.id)}
+                        className={`w-full flex items-center gap-3 p-2 rounded-lg transition-colors ${
+                          isOnTable
+                            ? 'bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-transparent'
+                        }`}
+                      >
+                        <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-white flex-1 text-left">
+                          {p.display_name}
+                        </span>
+                        {p.id === tablePlayer1 && (
+                          <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">On Table</span>
+                        )}
+                        {p.id === tablePlayer2 && (
+                          <span className="text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">On Table</span>
+                        )}
+                        {!isOnTable && (
+                          <span className="text-xs text-gray-400">Waiting</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Card>
 
-          {waitingPlayers.length > 0 && (
-            <Card padding="sm" className="mb-4">
-              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Rotation queue</div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {waitingPlayers.map((p, i) => (
-                  <span key={p.id} className="text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1">
-                    {i > 0 && <ArrowRight className="w-3 h-3 text-gray-400" />}
-                    {p.display_name}
-                  </span>
-                ))}
-              </div>
-            </Card>
+              {waitingPlayers.length > 0 && (
+                <Card padding="sm" className="mb-4">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Rotation queue</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {waitingPlayers.map((p, i) => (
+                      <span key={p.id} className="text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                        {i > 0 && <ArrowRight className="w-3 h-3 text-gray-400" />}
+                        {p.display_name}
+                      </span>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : (
+            <>
+              <Card className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Which teams start on the table?</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Tap two teams to put them on the table first</p>
+
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className={`p-4 rounded-xl border-2 text-center ${
+                    tableTeam1 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {tableTeam1 ? (
+                      <>
+                        <div className="flex items-center justify-center gap-1 mb-2">
+                          <Avatar
+                            name={players.find(p => p.id === tableTeam1[0])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === tableTeam1[0])?.avatar_url}
+                            size="sm"
+                          />
+                          <Avatar
+                            name={players.find(p => p.id === tableTeam1[1])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === tableTeam1[1])?.avatar_url}
+                            size="sm"
+                          />
+                        </div>
+                        <div className="text-xs font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === tableTeam1[0])?.display_name} & {players.find(p => p.id === tableTeam1[1])?.display_name}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-gray-400">Team 1</div>
+                    )}
+                  </div>
+                  <div className={`p-4 rounded-xl border-2 text-center ${
+                    tableTeam2 ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'border-dashed border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {tableTeam2 ? (
+                      <>
+                        <div className="flex items-center justify-center gap-1 mb-2">
+                          <Avatar
+                            name={players.find(p => p.id === tableTeam2[0])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === tableTeam2[0])?.avatar_url}
+                            size="sm"
+                          />
+                          <Avatar
+                            name={players.find(p => p.id === tableTeam2[1])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === tableTeam2[1])?.avatar_url}
+                            size="sm"
+                          />
+                        </div>
+                        <div className="text-xs font-medium text-gray-900 dark:text-white">
+                          {players.find(p => p.id === tableTeam2[0])?.display_name} & {players.find(p => p.id === tableTeam2[1])?.display_name}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-gray-400">Team 2</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {pairedTeams.map((team, idx) => {
+                    const isOnTable = tableTeam1 === team || tableTeam2 === team;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => selectTableTeam(team)}
+                        className={`w-full flex items-center gap-3 p-2 rounded-lg transition-colors ${
+                          isOnTable
+                            ? 'bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Avatar
+                            name={players.find(p => p.id === team[0])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === team[0])?.avatar_url}
+                            size="sm"
+                          />
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">
+                            {players.find(p => p.id === team[0])?.display_name}
+                          </span>
+                          <span className="text-xs text-gray-500">&</span>
+                          <Avatar
+                            name={players.find(p => p.id === team[1])?.display_name || ''}
+                            imageUrl={players.find(p => p.id === team[1])?.avatar_url}
+                            size="sm"
+                          />
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">
+                            {players.find(p => p.id === team[1])?.display_name}
+                          </span>
+                        </div>
+                        {isOnTable && (
+                          <span className="text-xs bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">On Table</span>
+                        )}
+                        {!isOnTable && (
+                          <span className="text-xs text-gray-400">Waiting</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {waitingTeams.length > 0 && (
+                <Card padding="sm" className="mb-4">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Waiting teams queue</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {waitingTeams.map((team, i) => (
+                      <span key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                        {i > 0 && <ArrowRight className="w-3 h-3 text-gray-400" />}
+                        {players.find(p => p.id === team[0])?.display_name} & {players.find(p => p.id === team[1])?.display_name}
+                      </span>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </>
           )}
 
           <Button
             variant="accent"
             size="lg"
             className="w-full"
-            disabled={!tablePlayer1 || !tablePlayer2 || isCreating}
+            disabled={
+              sessionMode === 'singles'
+                ? !tablePlayer1 || !tablePlayer2 || isCreating
+                : !tableTeam1 || !tableTeam2 || isCreating
+            }
             onClick={handleStartSession}
           >
             {isCreating ? 'Starting...' : 'Start Session'}
