@@ -39,21 +39,33 @@ export default function PlayersPage() {
 
     const withStats = await Promise.all(
       active.map(async (p) => {
-        // 1v1 match stats
+        // Match stats (includes doubles — check partner IDs too)
         const matches = await db.matches
           .where('status')
           .equals('completed')
-          .filter((m) => m.player_1_id === p.id || m.player_2_id === p.id)
+          .filter((m) =>
+            m.player_1_id === p.id || m.player_2_id === p.id ||
+            m.player_1_partner_id === p.id || m.player_2_partner_id === p.id
+          )
           .toArray();
 
-        const matchWins = matches.filter((m) => m.winner_id === p.id).length;
+        const matchWins = matches.filter((m) => {
+          const onTeam1 = m.player_1_id === p.id || m.player_1_partner_id === p.id;
+          const team1Won = m.winner_id === m.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
         const matchLosses = matches.length - matchWins;
 
-        // Open Table session stats
+        // Session stats (includes doubles — check partner IDs too)
         const sessionGames = allSessionGames.filter(
-          (g) => g.player_1_id === p.id || g.player_2_id === p.id
+          (g) => g.player_1_id === p.id || g.player_2_id === p.id ||
+                 g.player_1_partner_id === p.id || g.player_2_partner_id === p.id
         );
-        const sessionWins = sessionGames.filter((g) => g.winner_id === p.id).length;
+        const sessionWins = sessionGames.filter((g) => {
+          const onTeam1 = g.player_1_id === p.id || g.player_1_partner_id === p.id;
+          const team1Won = g.winner_id === g.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
         const sessionLosses = sessionGames.length - sessionWins;
 
         const wins = matchWins + sessionWins;

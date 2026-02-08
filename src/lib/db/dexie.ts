@@ -27,11 +27,16 @@ export interface LocalGameType {
   synced: boolean;
 }
 
+export type MatchMode = 'singles' | 'doubles' | 'scotch_doubles';
+
 export interface LocalMatch {
   id: string;
   game_type_id: string;
+  match_mode: MatchMode;
   player_1_id: string;
   player_2_id: string;
+  player_1_partner_id: string | null;  // doubles: Team 1 partner
+  player_2_partner_id: string | null;  // doubles: Team 2 partner
   format: 'single' | 'race_to' | 'best_of';
   format_target: number | null;
   player_1_score: number;
@@ -68,12 +73,18 @@ export interface LocalVenue {
 export interface LocalSession {
   id: string;
   game_type_id: string;
+  session_mode: MatchMode;
   status: 'active' | 'completed';
   started_at: string;
   completed_at: string | null;
   participant_ids: string[];          // All player IDs in this session
-  table_player_ids: [string, string]; // The two currently playing
-  waiting_queue: string[];            // Rotation order of waiting players
+  // Singles fields:
+  table_player_ids: [string, string]; // The two currently playing (singles)
+  waiting_queue: string[];            // Rotation order (singles)
+  // Doubles fields:
+  teams: Array<[string, string]>;                         // All team pairings
+  table_team_ids: [[string, string], [string, string]] | null; // Two teams on table
+  waiting_team_queue: Array<[string, string]>;            // Queue of waiting teams
   venue_id: string | null;
   synced: boolean;
   local_updated_at: string;
@@ -85,10 +96,14 @@ export interface LocalSessionGame {
   game_number: number;
   player_1_id: string;
   player_2_id: string;
+  player_1_partner_id: string | null;  // doubles partner
+  player_2_partner_id: string | null;  // doubles partner
   winner_id: string;
   completed_at: string;
-  prev_table_players: [string, string]; // Snapshot for undo
-  prev_queue: string[];                 // Snapshot for undo
+  prev_table_players: [string, string]; // Snapshot for undo (singles)
+  prev_queue: string[];                 // Snapshot for undo (singles)
+  prev_table_teams: [[string, string], [string, string]] | null; // Snapshot (doubles)
+  prev_team_queue: Array<[string, string]>;                      // Snapshot (doubles)
   synced: boolean;
 }
 
@@ -130,6 +145,37 @@ class BarRoomBuddiesDB extends Dexie {
       syncMeta: 'key',
       sessions: 'id, game_type_id, status, started_at, venue_id, synced',
       sessionGames: 'id, session_id, game_number, winner_id, synced',
+    });
+
+    // v3: Add doubles support fields (no index changes needed)
+    this.version(3).stores({
+      profiles: 'id, email, display_name, is_local, device_id, merged_into, synced',
+      gameTypes: 'id, name, is_system, created_by, synced',
+      matches: 'id, game_type_id, player_1_id, player_2_id, match_mode, status, winner_id, started_at, completed_at, venue_id, synced, local_updated_at',
+      games: 'id, match_id, game_number, winner_id, synced',
+      venues: 'id, owner_id, synced',
+      syncMeta: 'key',
+      sessions: 'id, game_type_id, session_mode, status, started_at, venue_id, synced',
+      sessionGames: 'id, session_id, game_number, winner_id, synced',
+    }).upgrade(tx => {
+      // Set defaults for existing records
+      tx.table('matches').toCollection().modify(match => {
+        if (!match.match_mode) match.match_mode = 'singles';
+        if (match.player_1_partner_id === undefined) match.player_1_partner_id = null;
+        if (match.player_2_partner_id === undefined) match.player_2_partner_id = null;
+      });
+      tx.table('sessions').toCollection().modify(session => {
+        if (!session.session_mode) session.session_mode = 'singles';
+        if (!session.teams) session.teams = [];
+        if (!session.table_team_ids) session.table_team_ids = null;
+        if (!session.waiting_team_queue) session.waiting_team_queue = [];
+      });
+      tx.table('sessionGames').toCollection().modify(game => {
+        if (game.player_1_partner_id === undefined) game.player_1_partner_id = null;
+        if (game.player_2_partner_id === undefined) game.player_2_partner_id = null;
+        if (!game.prev_table_teams) game.prev_table_teams = null;
+        if (!game.prev_team_queue) game.prev_team_queue = [];
+      });
     });
   }
 }
