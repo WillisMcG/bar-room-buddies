@@ -24,7 +24,7 @@ export default function BottomNav() {
             item.href === '/'
               ? pathname === '/'
               : item.href === '/play'
-              ? pathname.startsWith('/play') || pathname.startsWith('/match') || pathname.startsWith('/session')
+              ? pathname.startsWith('/play') || pathname.startsWith('/match') || pathname.startsWith('/session') || pathname.startsWith('/tournament')
               : pathname.startsWith(item.href);
 
           return (
