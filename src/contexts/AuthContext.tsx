@@ -121,28 +121,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
 
       if (data.user) {
-        // Create profile in Supabase
+        // Create profile via SECURITY DEFINER RPC (bypasses RLS for signup)
         const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            auth_user_id: data.user.id,
-            email,
-            display_name: displayName,
-            is_local: false,
-            device_id: getDeviceId(),
-          })
-          .select()
-          .single();
+          .rpc('create_profile_for_user', {
+            p_auth_user_id: data.user.id,
+            p_email: email,
+            p_display_name: displayName,
+            p_device_id: getDeviceId(),
+          });
 
         if (profileError) return { error: profileError.message };
 
         // Create venue if venueName is provided
         if (venueName && profileData) {
-          const { error: venueError } = await supabase.from('venues').insert({
-            name: venueName,
-            owner_id: profileData.id,
-            accent_color: '#22c55e',
-          });
+          const { error: venueError } = await supabase
+            .rpc('create_venue_for_profile', {
+              p_profile_id: profileData.id,
+              p_name: venueName,
+            });
 
           if (venueError) return { error: venueError.message };
         }
