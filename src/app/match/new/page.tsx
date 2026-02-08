@@ -48,6 +48,9 @@ function NewMatchContent() {
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showPlayerPicker, setShowPlayerPicker] = useState(false);
+  const [pickingSlot, setPickingSlot] = useState<'player1' | 'player2' | null>(null);
+  const [playerSearch, setPlayerSearch] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
@@ -100,7 +103,7 @@ function NewMatchContent() {
       venue_id: venueId,
     };
     await db.profiles.add(newPlayer);
-    setPlayers((prev) => [...prev, newPlayer]);
+    setPlayers((prev) => [...prev, newPlayer].sort((a, b) => a.display_name.localeCompare(b.display_name)));
     setNewPlayerName('');
     setShowNewPlayer(false);
   };
@@ -349,7 +352,7 @@ function NewMatchContent() {
             </Button>
           </div>
         ) : isDoublesMode ? (
-          // Doubles mode: select 4 players then assign to teams
+          // Doubles mode: select 4 players then assign/randomize teams
           <div className="space-y-4">
             {/* Step 1: Select 4 players */}
             <div>
@@ -542,95 +545,76 @@ function NewMatchContent() {
               </>
             )}
           </div>
-        ) : players.length === 1 ? (
-          // Singles mode: only 1 player available
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
-              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-                {players.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedPlayer1(p.id)}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                      selectedPlayer1 === p.id
-                        ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                    }`}
-                  >
-                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                      {p.display_name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="text-center py-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Add one more player to start a match</p>
-              <Button variant="primary" size="sm" onClick={() => setShowNewPlayer(true)}>
-                <UserPlus className="w-4 h-4 mr-1" /> Add Player 2
-              </Button>
-            </div>
-          </div>
         ) : (
-          // Singles mode: 2+ players available
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 1</label>
-              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-                {players.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedPlayer1(p.id)}
-                    disabled={p.id === selectedPlayer2}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                      selectedPlayer1 === p.id
-                        ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
-                        : p.id === selectedPlayer2
-                        ? 'opacity-30 cursor-not-allowed'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                    }`}
-                  >
-                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                      {p.display_name}
+          // Singles mode: slot-based player selection
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              {/* Player 1 Slot */}
+              <button
+                onClick={() => { setPickingSlot('player1'); setPlayerSearch(''); setShowPlayerPicker(true); }}
+                className={`flex-1 p-4 rounded-xl border-2 text-center transition-all ${
+                  selectedPlayer1
+                    ? 'border-blue-400 dark:border-blue-600 bg-blue-50 dark:bg-blue-950/30'
+                    : 'border-dashed border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20 hover:bg-blue-50 dark:hover:bg-blue-950/30'
+                }`}
+              >
+                {selectedPlayer1 ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Avatar name={players.find(p => p.id === selectedPlayer1)?.display_name || ''} imageUrl={players.find(p => p.id === selectedPlayer1)?.avatar_url} size="lg" />
+                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                      {players.find(p => p.id === selectedPlayer1)?.display_name}
                     </span>
-                  </button>
-                ))}
-              </div>
+                    <span className="text-[10px] text-blue-500">Tap to change</span>
+                  </div>
+                ) : (
+                  <div className="py-2">
+                    <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+                      <Plus className="w-6 h-6 text-blue-500" />
+                    </div>
+                    <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">Player 1</span>
+                  </div>
+                )}
+              </button>
+
+              {/* VS */}
+              <div className="text-sm font-bold text-gray-400 flex-shrink-0">VS</div>
+
+              {/* Player 2 Slot */}
+              <button
+                onClick={() => { setPickingSlot('player2'); setPlayerSearch(''); setShowPlayerPicker(true); }}
+                className={`flex-1 p-4 rounded-xl border-2 text-center transition-all ${
+                  selectedPlayer2
+                    ? 'border-red-400 dark:border-red-600 bg-red-50 dark:bg-red-950/30'
+                    : 'border-dashed border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30'
+                }`}
+              >
+                {selectedPlayer2 ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Avatar name={players.find(p => p.id === selectedPlayer2)?.display_name || ''} imageUrl={players.find(p => p.id === selectedPlayer2)?.avatar_url} size="lg" />
+                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                      {players.find(p => p.id === selectedPlayer2)?.display_name}
+                    </span>
+                    <span className="text-[10px] text-red-500">Tap to change</span>
+                  </div>
+                ) : (
+                  <div className="py-2">
+                    <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+                      <Plus className="w-6 h-6 text-red-500" />
+                    </div>
+                    <span className="text-sm text-red-600 dark:text-red-400 font-medium">Player 2</span>
+                  </div>
+                )}
+              </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-              <span className="text-xs font-bold text-gray-400">VS</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Player 2</label>
-              <div className="grid grid-cols-3 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-                {players.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedPlayer2(p.id)}
-                    disabled={p.id === selectedPlayer1}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${
-                      selectedPlayer2 === p.id
-                        ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500'
-                        : p.id === selectedPlayer1
-                        ? 'opacity-30 cursor-not-allowed'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                    }`}
-                  >
-                    <Avatar name={p.display_name} imageUrl={p.avatar_url} size="sm" />
-                    <span className="text-xs text-gray-700 dark:text-gray-300 truncate w-full text-center">
-                      {p.display_name}
-                    </span>
-                  </button>
-                ))}
+            {players.length < 2 && (
+              <div className="text-center py-2">
+                <p className="text-xs text-gray-400 mb-2">Need at least 2 players to start a match</p>
+                <Button variant="primary" size="sm" onClick={() => setShowNewPlayer(true)}>
+                  <UserPlus className="w-4 h-4 mr-1" /> Add Player
+                </Button>
               </div>
-            </div>
+            )}
           </div>
         )}
       </Card>
@@ -645,6 +629,73 @@ function NewMatchContent() {
       >
         {isCreating ? 'Starting...' : isDoublesMode ? 'Start Doubles Match' : 'Start Match'}
       </Button>
+
+      {/* Player Picker Modal */}
+      <Modal
+        isOpen={showPlayerPicker}
+        onClose={() => { setShowPlayerPicker(false); setPlayerSearch(''); }}
+        title={pickingSlot === 'player1' ? 'Choose Player 1' : 'Choose Player 2'}
+      >
+        <div className="space-y-3">
+          {/* Search */}
+          {players.length > 6 && (
+            <input
+              type="text"
+              placeholder="Search players..."
+              value={playerSearch}
+              onChange={(e) => setPlayerSearch(e.target.value)}
+              autoFocus
+              className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          )}
+
+          {/* Player list — alphabetical, excludes the other slot's player */}
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {players
+              .filter(p => {
+                // Hide the player already selected in the other slot
+                if (pickingSlot === 'player1' && p.id === selectedPlayer2) return false;
+                if (pickingSlot === 'player2' && p.id === selectedPlayer1) return false;
+                // Search filter
+                if (playerSearch && !p.display_name.toLowerCase().includes(playerSearch.toLowerCase())) return false;
+                return true;
+              })
+              .map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    if (pickingSlot === 'player1') setSelectedPlayer1(p.id);
+                    else setSelectedPlayer2(p.id);
+                    setShowPlayerPicker(false);
+                    setPlayerSearch('');
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                >
+                  <Avatar name={p.display_name} imageUrl={p.avatar_url} size="md" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">{p.display_name}</span>
+                </button>
+              ))}
+            {players.filter(p => {
+              if (pickingSlot === 'player1' && p.id === selectedPlayer2) return false;
+              if (pickingSlot === 'player2' && p.id === selectedPlayer1) return false;
+              if (playerSearch && !p.display_name.toLowerCase().includes(playerSearch.toLowerCase())) return false;
+              return true;
+            }).length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No players found</p>
+            )}
+          </div>
+
+          {/* Create new player shortcut */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <button
+              onClick={() => { setShowPlayerPicker(false); setPlayerSearch(''); setShowNewPlayer(true); }}
+              className="w-full flex items-center justify-center gap-2 p-2 rounded-lg text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors font-medium"
+            >
+              <UserPlus className="w-4 h-4" /> Create New Player
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* New Player Modal */}
       <Modal isOpen={showNewPlayer} onClose={() => setShowNewPlayer(false)} title="Add Player">
