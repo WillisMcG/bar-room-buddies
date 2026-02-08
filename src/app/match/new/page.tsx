@@ -12,6 +12,7 @@ import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import { useAuth } from '@/contexts/AuthContext';
 import { shuffleTeams } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -28,6 +29,7 @@ export default function NewMatchPage() {
 function NewMatchContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { venueId } = useAuth();
   const isDoublesMode = searchParams.get('mode') === 'doubles';
 
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
@@ -95,6 +97,7 @@ function NewMatchContent() {
       merged_into: null,
       created_at: new Date().toISOString(),
       synced: false,
+      venue_id: venueId,
     };
     await db.profiles.add(newPlayer);
     setPlayers((prev) => [...prev, newPlayer]);
@@ -199,7 +202,7 @@ function NewMatchContent() {
       started_at: new Date().toISOString(),
       completed_at: null,
       status: 'in_progress',
-      venue_id: null,
+      venue_id: venueId,
       synced: false,
       local_updated_at: new Date().toISOString(),
     });
