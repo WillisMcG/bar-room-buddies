@@ -11,6 +11,7 @@ import Avatar from '@/components/ui/Avatar';
 import Modal from '@/components/ui/Modal';
 import { db, getDeviceId, seedSystemGameTypes } from '@/lib/db/dexie';
 import type { LocalProfile, LocalGameType, MatchMode } from '@/lib/db/dexie';
+import { useAuth } from '@/contexts/AuthContext';
 import { shuffleTeams } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -18,6 +19,7 @@ type Step = 'game_type' | 'players' | 'team_pairing' | 'table_setup';
 
 export default function NewSessionPage() {
   const router = useRouter();
+  const { venueId } = useAuth();
   const [step, setStep] = useState<Step>('game_type');
   const [gameTypes, setGameTypes] = useState<LocalGameType[]>([]);
   const [players, setPlayers] = useState<LocalProfile[]>([]);
@@ -144,6 +146,7 @@ export default function NewSessionPage() {
       merged_into: null,
       created_at: new Date().toISOString(),
       synced: false,
+      venue_id: venueId,
     };
     await db.profiles.add(newPlayer);
     setPlayers(prev => [...prev, newPlayer].sort((a, b) => a.display_name.localeCompare(b.display_name)));
@@ -197,7 +200,7 @@ export default function NewSessionPage() {
         teams: [],
         table_team_ids: null,
         waiting_team_queue: [],
-        venue_id: null,
+        venue_id: venueId,
         synced: false,
         local_updated_at: new Date().toISOString(),
       });
@@ -215,7 +218,7 @@ export default function NewSessionPage() {
         teams: pairedTeams,
         table_team_ids: [tableTeam1!, tableTeam2!],
         waiting_team_queue: waitingTeams,
-        venue_id: null,
+        venue_id: venueId,
         synced: false,
         local_updated_at: new Date().toISOString(),
       });
