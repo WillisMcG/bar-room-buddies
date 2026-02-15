@@ -174,7 +174,7 @@ export default function NewSessionPage() {
     setIsCreating(true);
 
     if (sessionMode === 'singles') {
-      if (!selectedGameType || !tablePlayer1 || !tablePlayer2 || selectedPlayerIds.size < 3) {
+      if (!selectedGameType || !tablePlayer1 || !tablePlayer2 || selectedPlayerIds.size < 2) {
         setIsCreating(false);
         return;
       }
@@ -291,7 +291,7 @@ export default function NewSessionPage() {
                 if (s === 'players' && selectedGameType) setStep(s);
                 if (s === 'team_pairing' && selectedPlayerIds.size >= 4 && sessionMode !== 'singles') setStep(s);
                 if (s === 'table_setup') {
-                  if (sessionMode === 'singles' && selectedPlayerIds.size >= 3) setStep(s);
+                  if (sessionMode === 'singles' && selectedPlayerIds.size >= 2) setStep(s);
                   if (sessionMode !== 'singles' && allPlayersTeamed()) setStep(s);
                 }
               }}
@@ -421,9 +421,9 @@ export default function NewSessionPage() {
               </button>
             </div>
             {sessionMode === 'singles' ? (
-              selectedPlayerIds.size < 3 && (
+              selectedPlayerIds.size < 2 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
-                  Select at least 3 players to start a group session
+                  Select at least 2 players to start a session
                 </p>
               )
             ) : (
@@ -483,10 +483,20 @@ export default function NewSessionPage() {
             className="w-full"
             disabled={
               sessionMode === 'singles'
-                ? selectedPlayerIds.size < 3
+                ? selectedPlayerIds.size < 2
                 : selectedPlayerIds.size < 4 || selectedPlayerIds.size % 2 !== 0
             }
-            onClick={() => setStep(sessionMode === 'singles' ? 'table_setup' : 'team_pairing')}
+            onClick={() => {
+              if (sessionMode === 'singles' && selectedPlayerIds.size === 2) {
+                // With exactly 2 players, auto-assign them to the table and skip table_setup
+                const ids = Array.from(selectedPlayerIds);
+                setTablePlayer1(ids[0]);
+                setTablePlayer2(ids[1]);
+                setStep('table_setup');
+              } else {
+                setStep(sessionMode === 'singles' ? 'table_setup' : 'team_pairing');
+              }
+            }}
           >
             Next: {sessionMode === 'singles' ? 'Set Up Table' : 'Pair Teams'}
           </Button>
