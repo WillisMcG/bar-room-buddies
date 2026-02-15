@@ -41,7 +41,7 @@ export default function NewTournamentPage() {
   const [tournamentFormat, setTournamentFormat] = useState<TournamentFormat>('single_elimination');
   const [matchMode, setMatchMode] = useState<MatchMode>('singles');
   const [selectedGameType, setSelectedGameType] = useState('');
-  const [matchFormat, setMatchFormat] = useState<string>('race_to');
+  const [matchFormat, setMatchFormat] = useState<string>('single');
   const [matchFormatTarget, setMatchFormatTarget] = useState(5);
   const [tournamentName, setTournamentName] = useState('');
 
@@ -75,8 +75,6 @@ export default function NewTournamentPage() {
         const eightBall = types.find(t => t.name === '8-Ball');
         const defaultType = eightBall || types[0];
         setSelectedGameType(defaultType.id);
-        if (defaultType.default_format) setMatchFormat(defaultType.default_format);
-        if (defaultType.default_format_target) setMatchFormatTarget(defaultType.default_format_target);
       }
       setIsLoading(false);
     };
@@ -125,14 +123,9 @@ export default function NewTournamentPage() {
     }
   };
 
-  // Handle game type change
+  // Handle game type change (don't override match format — tournaments default to single game)
   const handleGameTypeChange = (id: string) => {
     setSelectedGameType(id);
-    const gt = gameTypes.find(g => g.id === id);
-    if (gt) {
-      setMatchFormat(gt.default_format);
-      if (gt.default_format_target) setMatchFormatTarget(gt.default_format_target);
-    }
   };
 
   // Player selection
