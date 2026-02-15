@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Trophy, Crown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Trophy, Crown, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import PageWrapper from '@/components/layout/PageWrapper';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Avatar from '@/components/ui/Avatar';
 import BracketMatch from '@/components/tournament/BracketMatch';
+import BracketTree from '@/components/tournament/BracketTree';
 import { db } from '@/lib/db/dexie';
 import type {
   LocalTournament,
@@ -38,6 +39,7 @@ export default function TournamentPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   // View state
+  const [viewMode, setViewMode] = useState<'bracket' | 'list'>('bracket');
   const [selectedBracket, setSelectedBracket] = useState<BracketType>('winners');
   const [selectedRound, setSelectedRound] = useState(1);
 
@@ -197,7 +199,7 @@ export default function TournamentPage() {
                     s.placement === 2 ? 'bg-gray-100 dark:bg-gray-800' : ''
                   }`}>
                     <span className="text-sm font-bold text-gray-400 w-6 text-right">
-                      {s.placement === 1 ? '🥇' : s.placement === 2 ? '🥈' : s.placement === 3 ? '🥉' : `#${s.placement}`}
+                      {s.placement === 1 ? '\uD83E\uDD47' : s.placement === 2 ? '\uD83E\uDD48' : s.placement === 3 ? '\uD83E\uDD49' : `#${s.placement}`}
                     </span>
                     <Avatar name={player?.display_name || '?'} size="xs" />
                     <span className="text-sm text-gray-900 dark:text-white truncate flex-1">
@@ -229,7 +231,7 @@ export default function TournamentPage() {
   return (
     <PageWrapper
       title={tournament.name}
-      subtitle={`${gameType?.name || ''} • ${tournament.format === 'single_elimination' ? 'Single' : 'Double'} Elim`}
+      subtitle={`${gameType?.name || ''} \u2022 ${tournament.format === 'single_elimination' ? 'Single' : 'Double'} Elim`}
       action={
         <button onClick={() => router.push('/play')} className="p-2 -ml-2">
           <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -255,99 +257,147 @@ export default function TournamentPage() {
           </div>
         </Card>
 
-        {/* Bracket type tabs (double elim only) */}
-        {isDoubleElim && (
-          <div className="flex gap-1">
-            {(['winners', 'losers', 'grand_final'] as BracketType[]).map(bt => {
-              const label = bt === 'winners' ? 'Winners' : bt === 'losers' ? 'Losers' : 'Final';
-              const count = matches.filter(m => m.bracket_type === bt && !m.is_bye).length;
-              return (
-                <button
-                  key={bt}
-                  onClick={() => {
-                    setSelectedBracket(bt);
-                    setSelectedRound(1);
-                  }}
-                  className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
-                    selectedBracket === bt
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                  }`}
-                >
-                  {label} ({count})
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Round navigation */}
-        {bracketRounds.length > 0 && (
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => {
-                const idx = bracketRounds.indexOf(selectedRound);
-                if (idx > 0) setSelectedRound(bracketRounds[idx - 1]);
-              }}
-              disabled={bracketRounds.indexOf(selectedRound) <= 0}
-              className="p-1 disabled:opacity-30"
-            >
-              <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-            </button>
-            <div className="flex gap-1 overflow-x-auto px-2">
-              {bracketRounds.map(r => {
-                const label = getRoundLabel(r, winnersRoundCount, selectedBracket);
-                const hasReady = matches.some(
-                  m => m.bracket_type === selectedBracket && m.round_number === r && m.status === 'ready',
-                );
+        {/* View toggle + bracket type tabs */}
+        <div className="flex items-center gap-2">
+          {/* Bracket type tabs (double elim only) */}
+          {isDoubleElim && (
+            <div className="flex gap-1 flex-1">
+              {(['winners', 'losers', 'grand_final'] as BracketType[]).map(bt => {
+                const label = bt === 'winners' ? 'Winners' : bt === 'losers' ? 'Losers' : 'Final';
+                const count = matches.filter(m => m.bracket_type === bt && !m.is_bye).length;
                 return (
                   <button
-                    key={r}
-                    onClick={() => setSelectedRound(r)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                      selectedRound === r
+                    key={bt}
+                    onClick={() => {
+                      setSelectedBracket(bt);
+                      setSelectedRound(1);
+                    }}
+                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      selectedBracket === bt
                         ? 'bg-green-500 text-white'
-                        : hasReady
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                     }`}
                   >
-                    {label}
+                    {label} ({count})
                   </button>
                 );
               })}
             </div>
+          )}
+
+          {/* View mode toggle */}
+          <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 shrink-0">
             <button
-              onClick={() => {
-                const idx = bracketRounds.indexOf(selectedRound);
-                if (idx < bracketRounds.length - 1) setSelectedRound(bracketRounds[idx + 1]);
-              }}
-              disabled={bracketRounds.indexOf(selectedRound) >= bracketRounds.length - 1}
-              className="p-1 disabled:opacity-30"
+              onClick={() => setViewMode('bracket')}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewMode === 'bracket'
+                  ? 'bg-white dark:bg-gray-700 shadow-sm'
+                  : 'text-gray-500'
+              }`}
+              title="Bracket view"
             >
-              <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <LayoutGrid className="w-4 h-4" />
             </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewMode === 'list'
+                  ? 'bg-white dark:bg-gray-700 shadow-sm'
+                  : 'text-gray-500'
+              }`}
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ===== BRACKET TREE VIEW ===== */}
+        {viewMode === 'bracket' && (
+          <div className="w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw]">
+            <BracketTree
+              matches={matches}
+              bracketType={isDoubleElim ? selectedBracket : 'winners'}
+              totalParticipants={tournament.total_participants}
+              profiles={profiles}
+              isDoubles={!!isDoubles}
+              onPlayMatch={handlePlayMatch}
+            />
           </div>
         )}
 
-        {/* Match cards for selected round */}
-        <div className="space-y-2">
-          {currentRoundMatches.length === 0 ? (
-            <Card padding="md" className="text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400">No matches in this round</p>
-            </Card>
-          ) : (
-            currentRoundMatches.map(match => (
-              <BracketMatch
-                key={match.id}
-                match={match}
-                profiles={profiles}
-                isDoubles={!!isDoubles}
-                onPlay={handlePlayMatch}
-              />
-            ))
-          )}
-        </div>
+        {/* ===== LIST VIEW (original round-by-round) ===== */}
+        {viewMode === 'list' && (
+          <>
+            {/* Round navigation */}
+            {bracketRounds.length > 0 && (
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => {
+                    const idx = bracketRounds.indexOf(selectedRound);
+                    if (idx > 0) setSelectedRound(bracketRounds[idx - 1]);
+                  }}
+                  disabled={bracketRounds.indexOf(selectedRound) <= 0}
+                  className="p-1 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                </button>
+                <div className="flex gap-1 overflow-x-auto px-2">
+                  {bracketRounds.map(r => {
+                    const label = getRoundLabel(r, winnersRoundCount, selectedBracket);
+                    const hasReady = matches.some(
+                      m => m.bracket_type === selectedBracket && m.round_number === r && m.status === 'ready',
+                    );
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => setSelectedRound(r)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                          selectedRound === r
+                            ? 'bg-green-500 text-white'
+                            : hasReady
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => {
+                    const idx = bracketRounds.indexOf(selectedRound);
+                    if (idx < bracketRounds.length - 1) setSelectedRound(bracketRounds[idx + 1]);
+                  }}
+                  disabled={bracketRounds.indexOf(selectedRound) >= bracketRounds.length - 1}
+                  className="p-1 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+            )}
+
+            {/* Match cards for selected round */}
+            <div className="space-y-2">
+              {currentRoundMatches.length === 0 ? (
+                <Card padding="md" className="text-center">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No matches in this round</p>
+                </Card>
+              ) : (
+                currentRoundMatches.map(match => (
+                  <BracketMatch
+                    key={match.id}
+                    match={match}
+                    profiles={profiles}
+                    isDoubles={!!isDoubles}
+                    onPlay={handlePlayMatch}
+                  />
+                ))
+              )}
+            </div>
+          </>
+        )}
 
         {/* Standings */}
         <Card padding="md">

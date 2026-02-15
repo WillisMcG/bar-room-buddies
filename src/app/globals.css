@@ -46,3 +46,27 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Bracket connector lines */
+.bracket-hline {
+  border-top: 2px solid #d1d5db; /* gray-300 */
+}
+.bracket-vline {
+  border-left: 2px solid #d1d5db;
+}
+
+:is(.dark) .bracket-hline {
+  border-top-color: #4b5563; /* gray-600 */
+}
+:is(.dark) .bracket-vline {
+  border-left-color: #4b5563;
+}
+
+/* Subtle pulse for in-progress matches */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
