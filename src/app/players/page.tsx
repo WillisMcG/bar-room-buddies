@@ -37,8 +37,12 @@ export default function PlayersPage() {
     const venueProfiles = venueId ? allProfiles.filter(p => p.venue_id === venueId || !p.venue_id) : allProfiles;
     const active = venueProfiles.filter((p) => !p.merged_into);
 
-    // Pre-load all session games once to avoid repeated queries
+    // Pre-load all session games and tournament matches once to avoid repeated queries
     const allSessionGames = await db.sessionGames.toArray();
+    const allTournamentMatches = await db.tournamentMatches
+      .where('status')
+      .equals('completed')
+      .toArray();
 
     const withStats = await Promise.all(
       active.map(async (p) => {
@@ -71,8 +75,21 @@ export default function PlayersPage() {
         }).length;
         const sessionLosses = sessionGames.length - sessionWins;
 
-        const wins = matchWins + sessionWins;
-        const losses = matchLosses + sessionLosses;
+        // Tournament stats (includes doubles — check partner IDs too)
+        const tournamentGames = allTournamentMatches.filter(
+          (m) => (m.player_1_id === p.id || m.player_2_id === p.id ||
+                  m.player_1_partner_id === p.id || m.player_2_partner_id === p.id) &&
+                 !m.is_bye
+        );
+        const tournamentWins = tournamentGames.filter((m) => {
+          const onTeam1 = m.player_1_id === p.id || m.player_1_partner_id === p.id;
+          const team1Won = m.winner_id === m.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
+        const tournamentLosses = tournamentGames.length - tournamentWins;
+
+        const wins = matchWins + sessionWins + tournamentWins;
+        const losses = matchLosses + sessionLosses + tournamentLosses;
 
         return {
           ...p,

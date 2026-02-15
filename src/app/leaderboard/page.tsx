@@ -50,10 +50,16 @@ export default function LeaderboardPage() {
         ? new Date(Date.now() - parseInt(timePeriod) * 24 * 60 * 60 * 1000).toISOString()
         : null;
 
-      // Pre-load session data for combining with match stats
+      // Pre-load session and tournament data for combining with match stats
       const allSessionGames = await db.sessionGames.toArray();
       const allSessions = await db.sessions.toArray();
       const sessionMap = new Map(allSessions.map(s => [s.id, s]));
+      const allTournamentMatches = await db.tournamentMatches
+        .where('status')
+        .equals('completed')
+        .toArray();
+      const allTournaments = await db.tournaments.toArray();
+      const tournamentMap = new Map(allTournaments.map(t => [t.id, t]));
 
       const results: LeaderboardEntry[] = [];
 
@@ -107,9 +113,34 @@ export default function LeaderboardPage() {
         }).length;
         const sessionLosses = sessionGames.length - sessionWins;
 
-        const wins = matchWins + sessionWins;
-        const losses = matchLosses + sessionLosses;
-        const totalGames = matches.length + sessionGames.length;
+        // Tournament stats (includes doubles — check partner IDs too)
+        let tournamentGames = allTournamentMatches.filter(
+          (m) => (m.player_1_id === p.id || m.player_2_id === p.id ||
+                  m.player_1_partner_id === p.id || m.player_2_partner_id === p.id) &&
+                 !m.is_bye
+        );
+
+        if (selectedGameType !== 'all') {
+          tournamentGames = tournamentGames.filter((m) => {
+            const tournament = tournamentMap.get(m.tournament_id);
+            return tournament?.game_type_id === selectedGameType;
+          });
+        }
+
+        if (cutoff) {
+          tournamentGames = tournamentGames.filter((m) => (m.completed_at || '') >= cutoff);
+        }
+
+        const tournamentWins = tournamentGames.filter((m) => {
+          const onTeam1 = m.player_1_id === p.id || m.player_1_partner_id === p.id;
+          const team1Won = m.winner_id === m.player_1_id;
+          return onTeam1 ? team1Won : !team1Won;
+        }).length;
+        const tournamentLosses = tournamentGames.length - tournamentWins;
+
+        const wins = matchWins + sessionWins + tournamentWins;
+        const losses = matchLosses + sessionLosses + tournamentLosses;
+        const totalGames = matches.length + sessionGames.length + tournamentGames.length;
 
         if (totalGames < 3) continue;
 

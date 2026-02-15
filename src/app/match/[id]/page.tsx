@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Undo2, Flag, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Undo2, Flag, ArrowLeft, CheckCircle2, Trash2 } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -154,6 +154,16 @@ export default function MatchPage() {
       local_updated_at: new Date().toISOString(),
       synced: false,
     });
+    router.push('/');
+  };
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const deleteMatch = async () => {
+    if (!match) return;
+    // Delete associated games first, then the match
+    await db.games.where('match_id').equals(match.id).delete();
+    await db.matches.delete(match.id);
     router.push('/');
   };
 
@@ -319,6 +329,11 @@ export default function MatchPage() {
             <Button variant="accent" className="w-full" onClick={() => router.push('/match/new')}>
               New Match
             </Button>
+            {isAbandoned && (
+              <Button variant="ghost" className="w-full text-red-500" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 className="w-4 h-4 mr-1" /> Delete Match
+              </Button>
+            )}
             <Button variant="ghost" className="w-full" onClick={() => router.push('/')}>
               Back to Home
             </Button>
@@ -447,6 +462,21 @@ export default function MatchPage() {
           </Button>
           <Button variant="danger" className="flex-1" onClick={abandonMatch}>
             End Match
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Delete Match Confirmation */}
+      <Modal isOpen={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Delete Match?">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          This will permanently delete this match and its game history. This cannot be undone.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
+            Cancel
+          </Button>
+          <Button variant="danger" className="flex-1" onClick={deleteMatch}>
+            Delete
           </Button>
         </div>
       </Modal>

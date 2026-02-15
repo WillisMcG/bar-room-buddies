@@ -187,7 +187,7 @@ export async function reverseAdvancement(
   if (match.next_winner_match_id) {
     const nextMatch = await db.tournamentMatches.get(match.next_winner_match_id);
     if (nextMatch && (nextMatch.status === 'in_progress' || nextMatch.status === 'completed')) {
-      return { success: false, error: 'Cannot undo \u2014 the next match has already started.' };
+      return { success: false, error: 'Cannot undo — the next match has already started.' };
     }
   }
 
@@ -195,7 +195,7 @@ export async function reverseAdvancement(
   if (match.next_loser_match_id) {
     const loserMatch = await db.tournamentMatches.get(match.next_loser_match_id);
     if (loserMatch && (loserMatch.status === 'in_progress' || loserMatch.status === 'completed')) {
-      return { success: false, error: 'Cannot undo \u2014 a match in the losers bracket has already started.' };
+      return { success: false, error: 'Cannot undo — a match in the losers bracket has already started.' };
     }
   }
 

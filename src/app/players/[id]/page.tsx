@@ -79,19 +79,42 @@ export default function PlayerProfilePage() {
       )
       .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
 
+    // Get tournament matches (includes doubles — check partner IDs too)
+    const allTournamentMatches = await db.tournamentMatches
+      .where('status')
+      .equals('completed')
+      .filter((m) =>
+        (m.player_1_id === id || m.player_2_id === id ||
+         m.player_1_partner_id === id || m.player_2_partner_id === id) &&
+        !m.is_bye
+      )
+      .toArray();
+    allTournamentMatches.sort((a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime());
+
     const matchWins = matches.filter((m) => didWinMatch(m)).length;
     const matchLosses = matches.length - matchWins;
     const sessionWins = sessionGames.filter((g) => didWinMatch(g)).length;
     const sessionLosses = sessionGames.length - sessionWins;
+    const tournamentWins = allTournamentMatches.filter((m) => {
+      const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+      const team1Won = m.winner_id === m.player_1_id;
+      return onTeam1 ? team1Won : !team1Won;
+    }).length;
+    const tournamentLosses = allTournamentMatches.length - tournamentWins;
 
-    const wins = matchWins + sessionWins;
-    const losses = matchLosses + sessionLosses;
+    const wins = matchWins + sessionWins + tournamentWins;
+    const losses = matchLosses + sessionLosses + tournamentLosses;
 
     // Combine all games chronologically for streak calculation
     type GameResult = { won: boolean; date: string };
     const allGames: GameResult[] = [
       ...matches.map((m) => ({ won: didWinMatch(m), date: m.completed_at || m.started_at })),
       ...sessionGames.map((g) => ({ won: didWinMatch(g), date: g.completed_at })),
+      ...allTournamentMatches.map((m) => {
+        const onTeam1 = m.player_1_id === id || m.player_1_partner_id === id;
+        const team1Won = m.winner_id === m.player_1_id;
+        return { won: onTeam1 ? team1Won : !team1Won, date: m.completed_at || m.local_updated_at };
+      }),
     ];
     allGames.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -129,6 +152,8 @@ export default function PlayerProfilePage() {
     const gameTypeMap = new Map(allGameTypes.map(gt => [gt.id, gt]));
     const allSessions = await db.sessions.toArray();
     const sessionMap = new Map(allSessions.map(s => [s.id, s]));
+    const allTournaments = await db.tournaments.toArray();
+    const tournamentMap = new Map(allTournaments.map(t => [t.id, t]));
 
     const perType = new Map<string, { wins: number; losses: number; games: GameResult[] }>();
 
@@ -148,6 +173,18 @@ export default function PlayerProfilePage() {
       const won = didWinMatch(g);
       if (won) entry.wins++; else entry.losses++;
       entry.games.push({ won, date: g.completed_at });
+      perType.set(gtId, entry);
+    }
+
+    for (const tm of allTournamentMatches) {
+      const tournament = tournamentMap.get(tm.tournament_id);
+      const gtId = tournament?.game_type_id || 'unknown';
+      const entry = perType.get(gtId) || { wins: 0, losses: 0, games: [] };
+      const onTeam1 = tm.player_1_id === id || tm.player_1_partner_id === id;
+      const team1Won = tm.winner_id === tm.player_1_id;
+      const won = onTeam1 ? team1Won : !team1Won;
+      if (won) entry.wins++; else entry.losses++;
+      entry.games.push({ won, date: tm.completed_at || tm.local_updated_at });
       perType.set(gtId, entry);
     }
 
@@ -198,6 +235,15 @@ export default function PlayerProfilePage() {
       addH2H(onTeam1 ? g.player_2_id : g.player_1_id, won);
       if (g.player_1_partner_id || g.player_2_partner_id) {
         addH2H(onTeam1 ? (g.player_2_partner_id || '') : (g.player_1_partner_id || ''), won);
+      }
+    }
+    for (const tm of allTournamentMatches) {
+      const onTeam1 = tm.player_1_id === id || tm.player_1_partner_id === id;
+      const team1Won = tm.winner_id === tm.player_1_id;
+      const won = onTeam1 ? team1Won : !team1Won;
+      addH2H(onTeam1 ? (tm.player_2_id || '') : (tm.player_1_id || ''), won);
+      if (tm.player_1_partner_id || tm.player_2_partner_id) {
+        addH2H(onTeam1 ? (tm.player_2_partner_id || '') : (tm.player_1_partner_id || ''), won);
       }
     }
 
@@ -256,6 +302,39 @@ export default function PlayerProfilePage() {
         local_updated_at: g.completed_at,
         opponent,
         gameType,
+      });
+    }
+
+    // Add tournament matches as match-like history entries
+    for (const tm of allTournamentMatches) {
+      const onTeam1 = tm.player_1_id === id || tm.player_1_partner_id === id;
+      const oppId = onTeam1 ? tm.player_2_id : tm.player_1_id;
+      const tournament = tournamentMap.get(tm.tournament_id);
+      const [opponent, tGameType] = await Promise.all([
+        oppId ? db.profiles.get(oppId) : Promise.resolve(undefined),
+        tournament ? db.gameTypes.get(tournament.game_type_id) : Promise.resolve(undefined),
+      ]);
+      combinedHistory.push({
+        id: tm.id,
+        game_type_id: tournament?.game_type_id || '',
+        match_mode: tournament?.match_mode || 'singles',
+        player_1_id: tm.player_1_id || '',
+        player_2_id: tm.player_2_id || '',
+        player_1_partner_id: tm.player_1_partner_id || null,
+        player_2_partner_id: tm.player_2_partner_id || null,
+        player_1_score: tm.player_1_score,
+        player_2_score: tm.player_2_score,
+        format: tournament?.match_format || 'single',
+        format_target: tournament?.match_format_target || 1,
+        winner_id: tm.winner_id,
+        status: 'completed' as const,
+        started_at: tm.completed_at || tm.local_updated_at,
+        completed_at: tm.completed_at,
+        venue_id: tournament?.venue_id || null,
+        synced: tm.synced,
+        local_updated_at: tm.local_updated_at,
+        opponent,
+        gameType: tGameType,
       });
     }
 
