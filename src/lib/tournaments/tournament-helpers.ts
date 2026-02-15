@@ -169,6 +169,127 @@ async function checkTournamentCompletion(
   }
 }
 
+// ---------- Undo Advancement ----------
+
+/**
+ * Reverse everything advanceWinner() did for a completed match.
+ * Clears winner from next match, loser from losers bracket match,
+ * un-eliminates the loser, and un-completes the tournament if needed.
+ * Only safe to call if the next match(es) haven't been played yet.
+ */
+export async function reverseAdvancement(
+  match: LocalTournamentMatch,
+  tournament: LocalTournament,
+): Promise<{ success: boolean; error?: string }> {
+  const now = new Date().toISOString();
+
+  // Safety: can't undo if the next winner match has already been played
+  if (match.next_winner_match_id) {
+    const nextMatch = await db.tournamentMatches.get(match.next_winner_match_id);
+    if (nextMatch && (nextMatch.status === 'in_progress' || nextMatch.status === 'completed')) {
+      return { success: false, error: 'Cannot undo \u2014 the next match has already started.' };
+    }
+  }
+
+  // Safety: can't undo if the next loser match has already been played
+  if (match.next_loser_match_id) {
+    const loserMatch = await db.tournamentMatches.get(match.next_loser_match_id);
+    if (loserMatch && (loserMatch.status === 'in_progress' || loserMatch.status === 'completed')) {
+      return { success: false, error: 'Cannot undo \u2014 a match in the losers bracket has already started.' };
+    }
+  }
+
+  const winnerId = match.winner_id;
+  if (!winnerId) return { success: false, error: 'No winner to undo.' };
+
+  // 1. Un-complete the tournament if it was marked complete
+  if (tournament.status === 'completed') {
+    await db.tournaments.update(tournament.id, {
+      status: 'in_progress',
+      completed_at: null,
+      winner_id: null,
+      local_updated_at: now,
+    });
+  }
+
+  // 2. Remove winner from the next match
+  if (match.next_winner_match_id) {
+    const nextMatch = await db.tournamentMatches.get(match.next_winner_match_id);
+    if (nextMatch) {
+      const update: Partial<LocalTournamentMatch> = {
+        local_updated_at: now,
+      };
+      if (match.next_winner_slot === 'player_1') {
+        update.player_1_id = null;
+        update.player_1_partner_id = null;
+        update.player_1_seed = null;
+      } else {
+        update.player_2_id = null;
+        update.player_2_partner_id = null;
+        update.player_2_seed = null;
+      }
+      // If the match was set to ready because both players were filled, revert to pending
+      if (nextMatch.status === 'ready') {
+        update.status = 'pending';
+      }
+      await db.tournamentMatches.update(nextMatch.id, update);
+    }
+  }
+
+  // 3. Remove loser from the losers bracket match (double elim)
+  if (tournament.format === 'double_elimination' && match.next_loser_match_id) {
+    const loserId = match.player_1_id === winnerId ? match.player_2_id : match.player_1_id;
+    if (loserId) {
+      const loserMatch = await db.tournamentMatches.get(match.next_loser_match_id);
+      if (loserMatch) {
+        const update: Partial<LocalTournamentMatch> = {
+          local_updated_at: now,
+        };
+        if (match.next_loser_slot === 'player_1') {
+          update.player_1_id = null;
+          update.player_1_partner_id = null;
+          update.player_1_seed = null;
+        } else {
+          update.player_2_id = null;
+          update.player_2_partner_id = null;
+          update.player_2_seed = null;
+        }
+        if (loserMatch.status === 'ready') {
+          update.status = 'pending';
+        }
+        await db.tournamentMatches.update(loserMatch.id, update);
+      }
+    }
+  }
+
+  // 4. Un-eliminate the loser
+  if (match.bracket_type !== 'winners' || tournament.format === 'single_elimination') {
+    const loserId = match.player_1_id === winnerId ? match.player_2_id : match.player_1_id;
+    if (loserId) {
+      const participant = await db.tournamentParticipants
+        .where('tournament_id').equals(tournament.id)
+        .filter(p => p.player_id === loserId)
+        .first();
+      if (participant && participant.status === 'eliminated') {
+        await db.tournamentParticipants.update(participant.id, {
+          status: 'active',
+          eliminated_round: null,
+        });
+      }
+    }
+  }
+
+  // 5. Reset this match to in_progress with no winner
+  await db.tournamentMatches.update(match.id, {
+    status: 'in_progress',
+    winner_id: null,
+    completed_at: null,
+    local_updated_at: now,
+  });
+
+  return { success: true };
+}
+
 // ---------- Progress & Labels ----------
 
 export function getTournamentProgress(

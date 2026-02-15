@@ -16,6 +16,7 @@ import type {
 } from '@/lib/db/dexie';
 import {
   advanceWinner,
+  reverseAdvancement,
   checkMatchComplete,
   getRoundLabel,
   getWinnersRoundCount,
@@ -119,12 +120,24 @@ export default function TournamentMatchPage() {
     loadData();
   };
 
-  // Undo last game
+  const [undoError, setUndoError] = useState<string | null>(null);
+
+  // Undo last game (including reversing bracket advancement if match was completed)
   const handleUndo = async () => {
     if (!match || !tournament || games.length === 0) return;
+    setUndoError(null);
 
     const lastGame = games[games.length - 1];
     const now = new Date().toISOString();
+
+    // If the match is completed, we need to reverse advancement first
+    if (match.status === 'completed') {
+      const result = await reverseAdvancement(match, tournament);
+      if (!result.success) {
+        setUndoError(result.error || 'Cannot undo this match.');
+        return;
+      }
+    }
 
     // Delete the game
     await db.tournamentGames.delete(lastGame.id);
@@ -134,23 +147,15 @@ export default function TournamentMatchPage() {
     const newP1Score = match.player_1_score - (isP1Win ? 1 : 0);
     const newP2Score = match.player_2_score - (isP1Win ? 0 : 1);
 
-    // If match was completed, un-complete it
-    const updates: Partial<LocalTournamentMatch> = {
+    await db.tournamentMatches.update(match.id, {
       player_1_score: newP1Score,
       player_2_score: newP2Score,
+      status: 'in_progress',
+      winner_id: null,
+      completed_at: null,
       local_updated_at: now,
-    };
+    });
 
-    if (match.status === 'completed') {
-      updates.status = 'in_progress';
-      updates.winner_id = null;
-      updates.completed_at = null;
-
-      // TODO: Undo advancement in next match (complex for double elim)
-      // For now, we only allow undo before navigating away
-    }
-
-    await db.tournamentMatches.update(match.id, updates);
     loadData();
   };
 
@@ -197,7 +202,7 @@ export default function TournamentMatchPage() {
             {winner?.display_name}{winnerPartner ? ` & ${winnerPartner.display_name}` : ''} wins!
           </h2>
           <p className="text-4xl font-black text-gray-900 dark:text-white mb-6">
-            {match.player_1_score} – {match.player_2_score}
+            {match.player_1_score} \u2013 {match.player_2_score}
           </p>
 
           {/* Game log */}
@@ -213,9 +218,22 @@ export default function TournamentMatchPage() {
             })}
           </div>
 
-          <Button onClick={() => router.push(`/tournament/${params.id}`)} className="w-full max-w-xs">
-            Back to Bracket
-          </Button>
+          {undoError && (
+            <p className="text-sm text-red-500 mb-2">{undoError}</p>
+          )}
+
+          <div className="w-full max-w-xs space-y-2">
+            <Button onClick={() => router.push(`/tournament/${params.id}`)} className="w-full">
+              Back to Bracket
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleUndo}
+              className="w-full"
+            >
+              <Undo2 className="w-4 h-4 mr-1.5" /> Undo Result
+            </Button>
+          </div>
         </div>
       </div>
     );

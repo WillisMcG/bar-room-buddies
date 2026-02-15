@@ -24,7 +24,6 @@ import {
   getWinnersRoundCount,
   getFinalStandings,
 } from '@/lib/tournaments/tournament-helpers';
-import type { TournamentStanding } from '@/lib/tournaments/tournament-helpers';
 import { formatDuration } from '@/lib/utils';
 
 export default function TournamentPage() {
@@ -398,34 +397,6 @@ export default function TournamentPage() {
             </div>
           </>
         )}
-
-        {/* Standings */}
-        <Card padding="md">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Standings</h3>
-          <div className="space-y-1">
-            {standings.map(s => {
-              const player = profiles.get(s.playerId);
-              const partner = s.partnerId ? profiles.get(s.partnerId) : null;
-              return (
-                <div key={s.playerId} className={`flex items-center gap-2 py-1 ${
-                  !s.isActive ? 'opacity-50' : ''
-                }`}>
-                  <span className="text-xs text-gray-400 w-4 text-right">#{s.seed}</span>
-                  <Avatar name={player?.display_name || '?'} size="xs" />
-                  <span className="text-xs text-gray-900 dark:text-white truncate flex-1">
-                    {player?.display_name}{partner ? ` & ${partner.display_name}` : ''}
-                  </span>
-                  {!s.isActive && (
-                    <span className="text-[10px] text-red-500 font-medium">OUT R{s.eliminatedRound}</span>
-                  )}
-                  {s.isActive && (
-                    <span className="text-[10px] text-green-500 font-medium">ACTIVE</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
 
         {/* End Tournament */}
         <Button
